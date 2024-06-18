@@ -1,0 +1,50 @@
+flow main(start any) (out any) {
+	nodes { range Range, printLine print_line }
+
+    :start -> [
+        (1 -> range:from),
+        (101 -> range:to)
+    ]
+    range.data -> printLine -> match:data
+    100 -> match:case[0] -> :stop
+}
+
+flow print_line(data int) (data int) {
+    nodes { 
+        CaseMod mod, 
+        Println println, 
+        Mutex<int> lock, 
+    }
+
+    :data -> [mod:data, lock:data]
+
+    15 -> mod:case[0] -> ('FizzBuzz' -> println)
+    3 -> mod:case[1] -> ('Fizz'     -> println)
+    5 -> mod:case[2] -> ('Buzz'     -> println)
+    mod:else -> println
+
+    println -> lock:sig
+    lock:data -> :data
+}
+
+fn range(from int, to int) (data number[]) {
+}
+
+fn branch(cond bool) (out atom, :else) {
+    if cond {
+        return :if;
+    } else {
+        return :else;
+    }
+}
+
+fn test() {
+    match branch(condition) {
+        :if -> { }
+        :else -> { }
+    }
+
+    // or
+    if condition { } 
+    else { }
+}

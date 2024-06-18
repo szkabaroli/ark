@@ -1,0 +1,40 @@
+import std:core
+
+type Input = struct {
+    first_name string
+    last_name string
+    age int
+}
+
+type Output = struct {
+    first_name string
+    last_name string
+    name string
+    adult bool
+}
+
+flow transform(in Input) -> (out Output, err ?error) {
+    node (
+        gt Gt;
+        concat Concat;
+        builder Struct<Output>
+    )
+    
+    :in.first_name -> builder:first_name
+    :in.last_name -> builder:last_name
+    
+    :in.first_name -> concat.a
+    :in.last_name -> concat.b
+
+    concat.out -> builder:name
+    
+    :in.age -> (18 -> gt) -> builder:adult
+
+    builder -> :out
+    concat.err -> :err
+}
+
+fn main() -> int {
+    let input = Input { first_name: "", last_name: "" };
+    let (s, err) = transform(input);
+}

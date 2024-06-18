@@ -1,0 +1,22 @@
+// Compares two values
+// + a - A value
+// + b - A value
+flow transform(a:int, b:int) -> (out:string) errors Test {
+    try node entry: @in;
+    node ret1: @out;
+    node ret2: @out;
+    node gt: math:gt;
+    node if_node: @if;
+    const if_node: Node<T> = @node(if);
+    
+    entry.start -> (
+        if_node.then -> ("" -> let r, "grater" -> out.ret1, ret1)
+        if_node.else -> ("lesser" -> out.ret2, ret2)
+    );
+
+    {entry.a -> gt.a, entry.b -> gt.b} -> if.cond;
+}
+
+// equals to:
+
+fn (transform)

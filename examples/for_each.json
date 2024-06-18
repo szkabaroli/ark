@@ -1,0 +1,154 @@
+{
+    "variables": [
+        {
+            "scope": "local",
+            "name": "array2",
+            "type": "string[]"
+        }
+    ],
+    "functions": [
+        {
+            "name": "main",
+            "parameters": [
+                {
+                    "name": "array1",
+                    "type": "string[]"
+                }
+            ],
+            "returns": [
+                {
+                    "name": "array1",
+                    "type": "string[]"
+                }
+            ],
+            "nodes": [
+                {
+                    "id": "n1",
+                    "type": "input",
+                    "data": {
+                        "label": "Input"
+                    },
+                    "position": {
+                        "x": 0,
+                        "y": 0
+                    }
+                },
+                {
+                    "id": "n2",
+                    "type": "for_each",
+                    "data": {},
+                    "position": {
+                        "x": 0,
+                        "y": 0
+                    }
+                },
+                {
+                    "id": "n3",
+                    "type": "call_fn",
+                    "data": {
+                        "fn": "transform"
+                    },
+                    "position": {
+                        "x": 0,
+                        "y": 0
+                    }
+                },
+                {
+                    "id": "n4",
+                    "type": "call_fn",
+                    "data": {
+                        "fn": "push_array"
+                    },
+                    "position": {
+                        "x": 0,
+                        "y": 0
+                    }
+                },
+                {
+                    "id": "n5",
+                    "type": "var",
+                    "data": {
+                        "label": "Variable reference",
+                        "varName": "array2"
+                    },
+                    "position": {
+                        "x": 0,
+                        "y": 0
+                    }
+                },
+                {
+                    "id": "n6",
+                    "type": "output",
+                    "data": {
+                        "label": "Output"
+                    },
+                    "position": {
+                        "x": 0,
+                        "y": 0
+                    }
+                }
+            ],
+            "edges": [
+                {
+                    "id": "n1-n2-flow",
+                    "source": "n1",
+                    "target": "n2",
+                    "sourceHandle": "$flow",
+                    "targetHandle": "$flow"
+                },
+                {
+                    "id": "n1-n2-data",
+                    "source": "n1",
+                    "target": "n2",
+                    "sourceHandle": "array1",
+                    "targetHandle": "iter"
+                },
+
+                {
+                    "id": "n2-n3-flow",
+                    "source": "n2",
+                    "target": "n3",
+                    "sourceHandle": "$each",
+                    "targetHandle": "$flow"
+                },
+                {
+                    "id": "n2-n3-data",
+                    "source": "n2",
+                    "target": "n3",
+                    "sourceHandle": "each",
+                    "targetHandle": "param"
+                },
+
+                {
+                    "id": "n3-n4-flow",
+                    "source": "n3",
+                    "target": "n4",
+                    "sourceHandle": "$flow",
+                    "targetHandle": "$flow"
+                },
+                {
+                    "id": "n3-n4-data",
+                    "source": "n3",
+                    "target": "n4",
+                    "sourceHandle": "return",
+                    "targetHandle": "value"
+                },
+
+                {
+                    "id": "n2-n6-flow",
+                    "source": "n2",
+                    "target": "n6",
+                    "sourceHandle": "$flow",
+                    "targetHandle": "$flow"
+                },
+                {
+                    "id": "n5-n6-data",
+                    "source": "n5",
+                    "target": "n6",
+                    "sourceHandle": "ref",
+                    "targetHandle": "return"
+                }
+            ]
+        }
+    ]
+}

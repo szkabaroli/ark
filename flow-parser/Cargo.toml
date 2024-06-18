@@ -1,0 +1,16 @@
+[package]
+authors = []
+edition = "2021"
+name = "flow-parser"
+version = "0.1.0"
+
+[dependencies]
+parser = {path = "../compiler/arkc-parser"}
+serde = {version = "1.0", features = ["derive"]}
+serde_json = "1.0"
+multimap="0.10"
+read-tree="0.2"
+
+[profile.release]
+lto = true
+panic = 'abort'

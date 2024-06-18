@@ -1,0 +1,116 @@
+{
+    "variables": [],
+    "functions": [
+        {
+            "name": "main",
+            "parameters": [
+                {
+                    "name": "ticked",
+                    "type": "bool"
+                }
+            ],
+            "returns": [
+                {
+                    "name": "",
+                    "type": "()"
+                }
+            ],
+            "nodes": [
+                {
+                    "id": "n1",
+                    "type": "input",
+                    "data": {
+                        "label": "Input"
+                    },
+                    "position": {
+                        "x": 0,
+                        "y": 0
+                    }
+                },
+                {
+                    "id": "n2",
+                    "type": "branch",
+                    "data": {
+                        "label": "Branch"
+                    },
+                    "position": {
+                        "x": 0,
+                        "y": 0
+                    }
+                },
+                {
+                    "id": "n3",
+                    "type": "const",
+                    "data": {
+                        "literal": "foo"
+                    },
+                    "position": {
+                        "x": 0,
+                        "y": 0
+                    }
+                },
+                {
+                    "id": "n4",
+                    "type": "const",
+                    "data": {
+                        "literal": "bar"
+                    },
+                    "position": {
+                        "x": 0,
+                        "y": 0
+                    }
+                },
+                {
+                    "id": "n5",
+                    "type": "output",
+                    "data": {
+                        "label": "Output If"
+                    },
+                    "position": {
+                        "x": 0,
+                        "y": 0
+                    }
+                }
+            ],
+            "edges": [
+                {
+                    "id": "n1-n2-flow",
+                    "source": "n1",
+                    "target": "n2",
+                    "sourceHandle": "$flow",
+                    "targetHandle": "$flow"
+                },
+
+                {
+                    "id": "n2-n3-flow",
+                    "source": "n2",
+                    "target": "n3",
+                    "sourceHandle": "$if",
+                    "targetHandle": "$flow"
+                },
+                {
+                    "id": "n2-n4-flow",
+                    "source": "n2",
+                    "target": "n4",
+                    "sourceHandle": "$else",
+                    "targetHandle": "$flow"
+                },
+
+                {
+                    "id": "n3-n5-flow",
+                    "source": "n3",
+                    "target": "n5",
+                    "sourceHandle": "$flow",
+                    "targetHandle": "$flow"
+                },
+                {
+                    "id": "n4-n5-flow",
+                    "source": "n4",
+                    "target": "n5",
+                    "sourceHandle": "$flow",
+                    "targetHandle": "$flow"
+                }
+            ]
+        }
+    ]
+}

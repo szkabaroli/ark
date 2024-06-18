@@ -1,0 +1,8 @@
+[workspace]
+members = [
+  "vm",
+  "flow-parser",
+  "compiler/arkc-frontend",
+  "compiler/arkc-parser",
+  "compiler/arkc-bytecode",
+]

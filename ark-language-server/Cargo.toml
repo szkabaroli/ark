@@ -1,0 +1,20 @@
+[package]
+name = "ark-language-server"
+version = "0.0.2"
+authors = ["Dominik Inführ <dominik.infuehr@gmail.com>"]
+description = "The Ark programming language"
+homepage = "https://github.com/szkabaroli/ark"
+repository = "https://github.com/szkabaroli/ark"
+license = "MIT"
+edition = "2021"
+
+[dependencies]
+dora-parser = { path = "../compiler/arkc-parser", version = "0.0.2" }
+dora-frontend = { path = "../compiler/arkc-frontend", version = "0.0.2" }
+lsp-server = "*"
+lsp-types = "*"
+serde_json = "*"
+serde = "*"
+threadpool = "*"
+crossbeam = "*"
+walkdir = "*"
