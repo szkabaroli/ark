@@ -4,6 +4,7 @@ pub use self::green::{GreenElement, GreenNode, GreenToken, GreenTreeBuilder};
 pub use self::lexer::lex;
 pub use self::span::Span;
 pub use self::token::TokenKind;
+pub use self::parser::Parser;
 
 pub mod ast;
 pub mod parser;

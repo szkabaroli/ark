@@ -1,0 +1,80 @@
+{
+	"name": "ark-lang",
+	"displayName": "The Ark Language",
+	"description": "",
+	"version": "0.0.5",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/szkabaroli/ark"
+	},
+	"publisher": "ark-lang",
+	"engines": {
+		"vscode": "^1.77.0"
+	},
+	"categories": [
+		"Programming Languages"
+	],
+	"main": "./out/extension.js",
+	"activationEvents": ["workspaceContains:*/ark-project.json"],
+	"contributes": {
+        "configuration": {
+            "title": "Ark",
+            "properties": {
+                "ark.languageServer.path": {
+                    "type": [
+                        "string",
+                        null
+                    ],
+                    "default": null,
+                    "description": "Path to ark-language-server"
+                }
+            }
+        },
+		"languages": [
+			{
+				"id": "ark",
+				"extensions": [
+					".ark"
+				],
+				"configuration": "./language-configuration.json"
+			}
+		],
+		"grammars": [
+			{
+				"language": "ark",
+				"scopeName": "source.ark",
+				"path": "./syntaxes/ark.tmLanguage.json"
+			}
+		],
+		"commands": [
+			{
+			  "command": "ark-lang.ping",
+			  "title": "Ark Ping"
+			}
+		  ]
+	},
+	"scripts": {
+		"vscode:prepublish": "npm run compile",
+		"compile": "tsc -p ./",
+		"watch": "tsc -watch -p ./",
+		"pretest": "npm run compile && npm run lint",
+		"lint": "eslint src --ext ts",
+		"test": "node ./out/test/runTest.js"
+	  },
+	  "dependencies": {
+		"vscode-languageclient": "^8.1.0"
+	  },
+	  "devDependencies": {
+		"@types/vscode": "^1.77.0",
+		"@types/glob": "^8.1.0",
+		"@types/mocha": "^10.0.1",
+		"@types/node": "16.x",
+		"@typescript-eslint/eslint-plugin": "^5.56.0",
+		"@typescript-eslint/parser": "^5.56.0",
+		"eslint": "^8.36.0",
+		"glob": "^8.1.0",
+		"mocha": "^10.2.0",
+		"typescript": "^4.9.5",
+		"@vscode/test-electron": "^2.3.0"
+	  }
+}

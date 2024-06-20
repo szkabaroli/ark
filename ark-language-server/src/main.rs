@@ -1,12 +1,15 @@
 use crossbeam::channel::{Receiver, Sender};
 use crossbeam::select;
-use parser::compute_line_column;
 use lsp_server::{Connection, Message, Notification};
-use lsp_types::notification::Notification as _;
+use lsp_types::notification::{self, Notification as _};
+use lsp_types::request::{self, Request};
 use lsp_types::{
-    ClientCapabilities, Diagnostic, InitializeParams, OneOf, Position, PublishDiagnosticsParams,
-    Range, ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind, Url,
+    ClientCapabilities, Diagnostic, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
+    DidOpenTextDocumentParams, DidSaveTextDocumentParams, HoverProviderCapability,
+    InitializeParams, OneOf, Position, PublishDiagnosticsParams, Range, ServerCapabilities,
+    TextDocumentSyncCapability, TextDocumentSyncKind, Url,
 };
+use parser::{ast, compute_line_column, compute_line_starts, ParseErrorWithLocation, Parser};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
@@ -14,6 +17,7 @@ use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use symbols::document_hover_request;
 use threadpool::ThreadPool;
 use walkdir::WalkDir;
 
@@ -22,8 +26,10 @@ use crate::symbols::document_symbol_request;
 mod symbols;
 
 fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
+    env_logger::init();
+
     let (connection, io_threads) = Connection::stdio();
-    eprintln!("start dora language server...");
+    log::info!("start ark language server...");
 
     // Run the server
     let (id, params) = connection.initialize_start()?;
@@ -43,8 +49,11 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         workspace_folders.push(file_path);
     }
 
+    let hover_provider = Some(HoverProviderCapability::Simple(true));
+
     let server_capabilities = ServerCapabilities {
         text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
+        hover_provider,
         document_symbol_provider: Some(OneOf::Left(true)),
         ..Default::default()
     };
@@ -52,7 +61,7 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     let initialize_data = serde_json::json!({
         "capabilities": server_capabilities,
         "serverInfo": {
-            "name": "dora-language-server",
+            "name": "ark-language-server",
             "version": "0.0.2"
         }
     });
@@ -71,12 +80,15 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
 
 struct ServerState {
     opened_files: HashMap<PathBuf, Arc<String>>,
+    parsed_files: HashMap<PathBuf, Arc<ast::File>>,
+
     #[allow(dead_code)]
     client_capabilities: ClientCapabilities,
     #[allow(dead_code)]
     workspace_folders: Vec<PathBuf>,
     projects: Vec<ProjectConfig>,
     files_with_errors: HashSet<PathBuf>,
+
     threadpool: ThreadPool,
     threadpool_sender: Sender<MainLoopTask>,
     threadpool_receiver: Receiver<MainLoopTask>,
@@ -88,10 +100,12 @@ impl ServerState {
         workspace_folders: Vec<PathBuf>,
         projects: Vec<ProjectConfig>,
     ) -> ServerState {
-        let threadpool = ThreadPool::new(1);
+        let threadpool = ThreadPool::new(6);
         let (sender, receiver) = crossbeam::channel::unbounded();
+
         ServerState {
             opened_files: HashMap::new(),
+            parsed_files: HashMap::new(),
             client_capabilities,
             workspace_folders,
             projects,
@@ -104,22 +118,20 @@ impl ServerState {
 }
 
 fn event_loop(
-    server_state: &mut ServerState,
+    state: &mut ServerState,
     connection: &Connection,
 ) -> Result<(), Box<dyn Error + Sync + Send>> {
     let mut event;
 
     loop {
-        event = next_event(server_state, connection);
+        event = next_event(state, connection);
         if event.is_none() {
             return Ok(());
         }
 
         match event {
-            Some(Event::LanguageServer(msg)) => handle_message(server_state, msg),
-            Some(Event::MainLoopTask(task)) => {
-                handle_main_loop_task(server_state, connection, task)
-            }
+            Some(Event::LanguageServer(msg)) => handle_message(state, msg),
+            Some(Event::MainLoopTask(task)) => handle_main_loop_task(state, connection, task),
             None => {
                 return Ok(());
             }
@@ -127,13 +139,13 @@ fn event_loop(
     }
 }
 
-fn next_event(server_state: &mut ServerState, connection: &Connection) -> Option<Event> {
+fn next_event(state: &mut ServerState, connection: &Connection) -> Option<Event> {
     select! {
         recv(connection.receiver) -> msg => {
             match msg {
                 Ok(msg) => {
                     if let Message::Notification(ref notification) = msg {
-                        if notification.method == lsp_types::notification::Exit::METHOD {
+                        if notification.method == notification::Exit::METHOD {
                             return None;
                         }
                     }
@@ -148,7 +160,7 @@ fn next_event(server_state: &mut ServerState, connection: &Connection) -> Option
             }
         }
 
-        recv(server_state.threadpool_receiver) -> msg => {
+        recv(state.threadpool_receiver) -> msg => {
             match msg {
                 Ok(msg) => Some(Event::MainLoopTask(msg)),
                 Err(error) => {
@@ -160,16 +172,18 @@ fn next_event(server_state: &mut ServerState, connection: &Connection) -> Option
     }
 }
 
-fn handle_main_loop_task(
-    server_state: &mut ServerState,
-    connection: &Connection,
-    task: MainLoopTask,
-) {
+fn handle_main_loop_task(state: &mut ServerState, connection: &Connection, task: MainLoopTask) {
     match task {
+        MainLoopTask::ParsedFile(path, content, file) => {
+            state.opened_files.insert(path.clone(), content);
+            state.parsed_files.insert(path, file);
+        },
         MainLoopTask::SendResponse(msg) => connection.sender.send(msg).expect("send failed"),
         MainLoopTask::ReportError(errors_by_file) => {
+            eprintln!("{:?}", errors_by_file);
+
             let mut last_files_with_errors =
-                std::mem::replace(&mut server_state.files_with_errors, HashSet::new());
+                std::mem::replace(&mut state.files_with_errors, HashSet::new());
 
             for (file, errors) in errors_by_file {
                 let params = PublishDiagnosticsParams {
@@ -177,13 +191,17 @@ fn handle_main_loop_task(
                     version: None,
                     diagnostics: errors,
                 };
+
                 let notification =
-                    lsp_server::Notification::new("textDocument/publishDiagnostics".into(), params);
-                let msg = Message::Notification(notification);
-                connection.sender.send(msg).expect("send() failed");
+                    Notification::new("textDocument/publishDiagnostics".into(), params);
+
+                connection
+                    .sender
+                    .send(Message::Notification(notification))
+                    .expect("send() failed");
 
                 last_files_with_errors.remove(&file);
-                server_state.files_with_errors.insert(file);
+                state.files_with_errors.insert(file);
             }
 
             for file in last_files_with_errors {
@@ -192,27 +210,31 @@ fn handle_main_loop_task(
                     version: None,
                     diagnostics: Vec::new(),
                 };
+
                 let notification =
-                    lsp_server::Notification::new("textDocument/publishDiagnostics".into(), params);
-                let msg = Message::Notification(notification);
-                connection.sender.send(msg).expect("send() failed");
+                    Notification::new("textDocument/publishDiagnostics".into(), params);
+
+                connection
+                    .sender
+                    .send(Message::Notification(notification))
+                    .expect("send() failed");
             }
         }
     }
 }
 
-fn handle_message(server_state: &mut ServerState, msg: Message) {
+fn handle_message(state: &mut ServerState, msg: Message) {
     match msg {
         Message::Notification(notification) => {
             eprintln!("received notification {}", notification.method);
-            if notification.method == "textDocument/didChange" {
-                did_change_notification(server_state, notification);
-            } else if notification.method == "textDocument/didOpen" {
-                did_open_notification(server_state, notification);
-            } else if notification.method == "textDocument/didClose" {
-                did_close_notification(server_state, notification);
-            } else if notification.method == "textDocument/didSave" {
-                did_save_notification(server_state, notification);
+            if notification.method == notification::DidChangeTextDocument::METHOD {
+                did_change_notification(state, notification);
+            } else if notification.method == notification::DidOpenTextDocument::METHOD {
+                did_open_notification(state, notification);
+            } else if notification.method == notification::DidCloseTextDocument::METHOD {
+                did_close_notification(state, notification);
+            } else if notification.method == notification::DidSaveTextDocument::METHOD {
+                did_save_notification(state, notification);
             } else {
                 eprintln!("unknown notification {}", notification.method);
                 eprintln!("{}", notification.params);
@@ -221,8 +243,13 @@ fn handle_message(server_state: &mut ServerState, msg: Message) {
 
         Message::Request(request) => {
             eprintln!("received request {}", request.method);
-            if request.method == "textDocument/documentSymbol" {
-                document_symbol_request(server_state, request);
+
+            if request.method == request::DocumentSymbolRequest::METHOD {
+                document_symbol_request(state, request);
+            } else if request.method == request::HoverRequest::METHOD {
+                document_hover_request(state, request);
+            } else if request.method == "$/cancelRequest" {
+                eprintln!("got cancelRequest");
             } else {
                 eprintln!("unknown request {}", request.method);
                 eprintln!("{}", request.params);
@@ -233,9 +260,41 @@ fn handle_message(server_state: &mut ServerState, msg: Message) {
     }
 }
 
-fn did_change_notification(server_state: &mut ServerState, notification: Notification) {
-    let result =
-        serde_json::from_value::<lsp_types::DidChangeTextDocumentParams>(notification.params);
+fn parse_ast(sender: Sender<MainLoopTask>, path: PathBuf, content: Arc<String>) {
+    let line_starts = compute_line_starts(&content);
+    let parser = Parser::from_shared_string(content.clone());
+    let (file, parse_errors) = parser.parse();
+
+    let mut diag = vec![];
+
+    for error in parse_errors {
+        let (line, column) = compute_line_column(&line_starts, error.span.start());
+        let start = Position::new(line - 1, column - 1);
+        let (line, column) = compute_line_column(&line_starts, error.span.end());
+        let end = Position::new(line - 1, column - 1);
+
+        diag.push(Diagnostic {
+            range: Range::new(start, end),
+            message: error.error.message(),
+            ..Default::default()
+        });
+    }
+
+    let mut errors_by_file: HashMap<PathBuf, Vec<Diagnostic>> = HashMap::new();
+    errors_by_file.entry(path.clone()).or_default().append(&mut diag);
+
+    sender
+        .send(MainLoopTask::ParsedFile(path, content, file))
+        .expect("send failed");
+
+    sender
+        .send(MainLoopTask::ReportError(errors_by_file))
+        .expect("send failed");
+}
+
+fn did_change_notification(state: &mut ServerState, notification: Notification) {
+    let result = serde_json::from_value::<DidChangeTextDocumentParams>(notification.params);
+
     match result {
         Ok(result) => {
             let path = result
@@ -244,13 +303,11 @@ fn did_change_notification(server_state: &mut ServerState, notification: Notific
                 .to_file_path()
                 .expect("file path expected");
             let content = Arc::new(result.content_changes[0].text.clone());
-            eprintln!(
-                "CHANGE: {} --> {} lines",
-                path.display(),
-                content.lines().count(),
-            );
+            let sender = state.threadpool_sender.clone();
 
-            server_state.opened_files.insert(path, content);
+            state.threadpool.execute(move || {
+                parse_ast(sender, path, content);
+            });
         }
 
         Err(_) => {
@@ -259,9 +316,8 @@ fn did_change_notification(server_state: &mut ServerState, notification: Notific
     }
 }
 
-fn did_open_notification(_server_state: &mut ServerState, notification: Notification) {
-    let result =
-        serde_json::from_value::<lsp_types::DidOpenTextDocumentParams>(notification.params);
+fn did_open_notification(state: &mut ServerState, notification: Notification) {
+    let result = serde_json::from_value::<DidOpenTextDocumentParams>(notification.params);
     match result {
         Ok(result) => {
             let path = result
@@ -269,17 +325,19 @@ fn did_open_notification(_server_state: &mut ServerState, notification: Notifica
                 .uri
                 .to_file_path()
                 .expect("file path expected");
-            let text = result.text_document.text;
+            let content = Arc::new(result.text_document.text);
+            let sender = state.threadpool_sender.clone();
 
-            _server_state.opened_files.insert(path, Arc::new(text));
+            state.threadpool.execute(move || {
+                parse_ast(sender, path, content);
+            });
         }
         Err(_) => {}
     }
 }
 
-fn did_close_notification(_server_state: &mut ServerState, notification: Notification) {
-    let result =
-        serde_json::from_value::<lsp_types::DidCloseTextDocumentParams>(notification.params);
+fn did_close_notification(state: &mut ServerState, notification: Notification) {
+    let result = serde_json::from_value::<DidCloseTextDocumentParams>(notification.params);
     match result {
         Ok(result) => {
             let path = result
@@ -287,21 +345,21 @@ fn did_close_notification(_server_state: &mut ServerState, notification: Notific
                 .uri
                 .to_file_path()
                 .expect("file path expected");
-            _server_state.opened_files.remove(&path);
+            state.opened_files.remove(&path);
         }
         Err(_) => {}
     }
 }
 
-fn did_save_notification(server_state: &mut ServerState, notification: Notification) {
-    let result =
-        serde_json::from_value::<lsp_types::DidSaveTextDocumentParams>(notification.params);
-    match result {
-        Ok(_result) => {
-            let sender = server_state.threadpool_sender.clone();
-            let projects = server_state.projects.clone();
+fn did_save_notification(state: &mut ServerState, notification: Notification) {
+    let result = serde_json::from_value::<DidSaveTextDocumentParams>(notification.params);
 
-            server_state.threadpool.execute(move || {
+    match result {
+        Ok(_) => {
+            let sender = state.threadpool_sender.clone();
+            let projects = state.projects.clone();
+
+            state.threadpool.execute(move || {
                 for project in projects {
                     compile_project(project, sender.clone());
                 }
@@ -312,7 +370,9 @@ fn did_save_notification(server_state: &mut ServerState, notification: Notificat
 }
 
 fn compile_project(project: ProjectConfig, sender: Sender<MainLoopTask>) {
-    use dora_frontend::sema::{Sema, SemaArgs};
+    log::info!("recompiling project");
+
+    use arkc_frontend::sema::{Sema, SemaArgs};
     let sem_args = SemaArgs {
         arg_file: Some(project.main.to_string_lossy().into_owned()),
         packages: Vec::new(),
@@ -321,11 +381,12 @@ fn compile_project(project: ProjectConfig, sender: Sender<MainLoopTask>) {
 
     let mut sa = Sema::new(sem_args);
 
-    let success = dora_frontend::check_program(&mut sa);
+    let success = arkc_frontend::check_program(&mut sa);
     assert_eq!(success, !sa.diag.borrow().has_errors());
     let mut errors_by_file: HashMap<PathBuf, Vec<Diagnostic>> = HashMap::new();
 
     for error in sa.diag.borrow().errors() {
+        eprintln!("error: {:?}", error);
         if let Some(file_id) = error.file_id {
             let span = error.span.expect("missing location");
             let source_file = sa.file(file_id);
@@ -360,7 +421,7 @@ fn find_projects(workspaces: &[PathBuf]) -> Vec<ProjectConfig> {
     for workspace in workspaces {
         for entry in WalkDir::new(workspace) {
             let entry = entry.unwrap();
-            if entry.file_name() == "dora-project.json" {
+            if entry.file_name() == "ark-project.json" {
                 let config = read_project_json(entry.path());
 
                 match config {
@@ -397,6 +458,7 @@ fn read_project_json(path: &Path) -> Result<ProjectJsonConfig, Box<dyn Error>> {
 }
 
 enum MainLoopTask {
+    ParsedFile(PathBuf, Arc<String>, Arc<ast::File>),
     SendResponse(Message),
     ReportError(HashMap<PathBuf, Vec<Diagnostic>>),
 }

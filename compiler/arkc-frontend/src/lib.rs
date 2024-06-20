@@ -10,12 +10,12 @@ pub mod test;
 
 pub mod generator;
 pub mod typecheck;
+pub mod sema;
 mod error;
 mod fctdef_check;
 mod import_check;
 mod interner;
 mod program_parser;
-mod sema;
 mod specialize;
 mod stdlib_lookup;
 mod sym;

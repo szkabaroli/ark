@@ -9,12 +9,14 @@ license = "MIT"
 edition = "2021"
 
 [dependencies]
-dora-parser = { path = "../compiler/arkc-parser", version = "0.0.2" }
-dora-frontend = { path = "../compiler/arkc-frontend", version = "0.0.2" }
-lsp-server = "*"
-lsp-types = "*"
+parser = { path = "../compiler/arkc-parser", version = "0.0.2" }
+arkc-frontend = { path = "../compiler/arkc-frontend", version = "0.0.2" }
+lsp-server = "0.7.2"
+lsp-types = "0.94.0"
 serde_json = "*"
 serde = "*"
 threadpool = "*"
 crossbeam = "*"
 walkdir = "*"
+log = "*"
+env_logger = "*"

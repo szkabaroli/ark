@@ -1,8 +1,8 @@
 [package]
 authors = []
 edition = "2021"
-name = "frontend"
-version = "0.1.0"
+name = "arkc-frontend"
+version = "0.0.2"
 
 [dependencies]
 id-arena = "*"

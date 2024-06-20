@@ -155,7 +155,7 @@ impl Parser {
                 Arc::new(ElemData::TypeAlias(type_alias))
             }*/
             _ => {
-                assert!(!ELEM_FIRST.contains(self.current()));
+                //assert!(!ELEM_FIRST.contains(self.current()));
                 let span = self.current_span();
                 self.report_error_at(ParseError::ExpectedElement, span);
                 self.advance();

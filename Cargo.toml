@@ -1,7 +1,9 @@
 [workspace]
+resolver = "2"
 members = [
   "vm",
   "flow-parser",
+  "ark-language-server",
   "compiler/arkc-frontend",
   "compiler/arkc-parser",
   "compiler/arkc-bytecode",
