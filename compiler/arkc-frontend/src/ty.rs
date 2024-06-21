@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{ops::Index, sync::Arc};
 
 use crate::sema::Sema;
 
@@ -46,8 +46,7 @@ pub enum SourceType {
     // TypeAlias(AliasDefinitionId),
 
     // some lambda
-    // Lambda(SourceTypeArray, Box<SourceType>),
-
+    Function(SourceTypeArray, Box<SourceType>),
     // some enum
     // Enum(EnumDefinitionId, SourceTypeArray),
 }
@@ -158,12 +157,12 @@ impl SourceType {
 
             //SourceType::TypeParam(_) => *self == other,
 
-            //SourceType::Lambda(_, _) => {
+            SourceType::Function(_, _) => {
                 // for now expect the exact same params and return types
                 // possible improvement: allow super classes for params,
                 //                             sub class for return type
-            //    *self == other
-            //}
+                *self == other
+            }
         }
     }
 }
@@ -187,6 +186,50 @@ impl SourceTypeArray {
         match self {
             SourceTypeArray::Empty => true,
             _ => false,
+        }
+    }
+
+    pub fn iter(&self) -> SourceTypeArrayIter {
+        SourceTypeArrayIter {
+            params: self,
+            idx: 0,
+        }
+    }
+}
+
+impl Index<usize> for SourceTypeArray {
+    type Output = SourceType;
+
+    fn index(&self, idx: usize) -> &SourceType {
+        match self {
+            &SourceTypeArray::Empty => panic!("type list index out-of-bounds"),
+            &SourceTypeArray::List(ref params) => &params[idx],
+        }
+    }
+}
+
+pub struct SourceTypeArrayIter<'a> {
+    params: &'a SourceTypeArray,
+    idx: usize,
+}
+
+impl<'a> Iterator for SourceTypeArrayIter<'a> {
+    type Item = SourceType;
+
+    fn next(&mut self) -> Option<SourceType> {
+        match self.params {
+            &SourceTypeArray::Empty => None,
+
+            &SourceTypeArray::List(ref params) => {
+                if self.idx < params.len() {
+                    let ret = params[self.idx].clone();
+                    self.idx += 1;
+
+                    Some(ret)
+                } else {
+                    None
+                }
+            }
         }
     }
 }
@@ -283,7 +326,7 @@ impl<'a> SourceTypePrinter<'a> {
                     format!("TypeParam({})", idx.to_usize())
                 }
             }*/
-            /*SourceType::Lambda(params, return_type) => {
+            SourceType::Function(params, return_type) => {
                 let params = params
                     .iter()
                     .map(|ty| self.name(ty.clone()))
@@ -292,7 +335,7 @@ impl<'a> SourceTypePrinter<'a> {
                 let ret = self.name(*return_type);
 
                 format!("({}) -> {}", params, ret)
-            }*/
+            }
             /*SourceType::Tuple(subtypes) => {
                 let types = subtypes
                     .iter()

@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use crate::{
     ast::{
-        self, BinOp, CmpOp, Elem, ElemData, Expr, ExprData, FlowExpr, FlowExprData, FlowStmtData,
-        Ident, IdentData, ModifierList, Param, Path, PathData, Stmt, StmtData, Type, TypeData,
-        UnOp,
+        self, BinOp, BinOpKind, CmpOp, Elem, ElemData, Expr, ExprKind, FlowExpr, FlowExprData,
+        FlowStmtData, Ident, IdentData, ModifierList, Param, Path, PathData, Stmt, StmtData, Type,
+        TypeData, UnOp,
     },
     green::{GreenTreeBuilder, Marker},
     lex,
@@ -329,7 +329,7 @@ impl Parser {
         })
     }
 
-    fn parse_function(&mut self, modifiers: Option<ModifierList>) -> Arc<ast::Function> {
+    fn parse_function(&mut self, modifiers: Option<ModifierList>) -> Arc<ast::FnItem> {
         let start = self.current_span().start();
         self.start_node();
         self.assert(FN_KW);
@@ -341,16 +341,18 @@ impl Parser {
 
         let green = self.builder.finish_node(FN);
 
-        Arc::new(ast::Function {
+        Arc::new(ast::FnItem {
             id: self.new_node_id(),
-            modifiers: modifiers.clone(),
+            green,
             name,
             declaration_span,
             span: self.finish_node(),
-            params,
-            return_type,
+            sig: ast::FnSig {
+                inputs: params,
+                output: return_type,
+                span: declaration_span,
+            },
             block,
-            green,
         })
     }
 
@@ -533,7 +535,7 @@ impl Parser {
         if self.eat(SEMICOLON) {
             None
         } else {
-            let block = Arc::from(ExprData::Block(self.parse_block()));
+            let block = Arc::from(ExprKind::Block(self.parse_block()));
             Some(block)
         }
     }
@@ -771,7 +773,7 @@ impl Parser {
     fn parse_binary_expr(&mut self, precedence: u32) -> Expr {
         if !self.is_set(EXPRESSION_FIRST) {
             self.report_error(ParseError::ExpectedExpression);
-            return Arc::new(ExprData::Error {
+            return Arc::new(ExprKind::Error {
                 id: self.new_node_id(),
                 span: self.current_span(),
             });
@@ -852,7 +854,7 @@ impl Parser {
                 let expr = self.parse_postfix_expr();
                 let green = self.builder.finish_node(UNARY_EXPR);
 
-                Arc::new(ExprData::create_un(
+                Arc::new(ExprKind::create_un(
                     self.new_node_id(),
                     self.finish_node(),
                     green,
@@ -911,7 +913,7 @@ impl Parser {
                     self.builder
                         .finish_node_starting_at(POSTFIX_EXPR, marker.clone());
 
-                    Arc::new(ExprData::create_dot(
+                    Arc::new(ExprKind::create_dot(
                         self.new_node_id(),
                         span,
                         op_span,
@@ -954,7 +956,7 @@ impl Parser {
                     self.builder
                         .finish_node_starting_at(POSTFIX_EXPR, marker.clone());
 
-                    Arc::new(ExprData::create_path(
+                    Arc::new(ExprKind::create_path(
                         self.new_node_id(),
                         span,
                         op_span,
@@ -990,7 +992,7 @@ impl Parser {
         self.builder
             .finish_node_starting_at(POSTFIX_EXPR, marker.clone());
 
-        Arc::new(ExprData::create_call(self.new_node_id(), span, left, args))
+        Arc::new(ExprKind::create_call(self.new_node_id(), span, left, args))
     }
 
     fn parse_list<F, R>(
@@ -1045,34 +1047,34 @@ impl Parser {
 
     fn create_binary(&mut self, kind: TokenKind, start: u32, left: Expr, right: Expr) -> Expr {
         let op = match kind {
-            EQ => BinOp::Assign,
-            OR_OR => BinOp::Or,
-            AND_AND => BinOp::And,
-            EQ_EQ => BinOp::Cmp(CmpOp::Eq),
-            NOT_EQ => BinOp::Cmp(CmpOp::Ne),
-            LT => BinOp::Cmp(CmpOp::Lt),
-            LE => BinOp::Cmp(CmpOp::Le),
-            GT => BinOp::Cmp(CmpOp::Gt),
-            GE => BinOp::Cmp(CmpOp::Ge),
-            EQ_EQ_EQ => BinOp::Cmp(CmpOp::Is),
-            NOT_EQ_EQ => BinOp::Cmp(CmpOp::IsNot),
-            OR => BinOp::BitOr,
-            AND => BinOp::BitAnd,
-            CARET => BinOp::BitXor,
-            ADD => BinOp::Add,
-            SUB => BinOp::Sub,
-            MUL => BinOp::Mul,
-            DIV => BinOp::Div,
-            MODULO => BinOp::Mod,
-            LT_LT => BinOp::ShiftL,
-            GT_GT => BinOp::ArithShiftR,
-            GT_GT_GT => BinOp::LogicalShiftR,
+            EQ => BinOpKind::Assign,
+            OR_OR => BinOpKind::Or,
+            AND_AND => BinOpKind::And,
+            EQ_EQ => BinOpKind::Cmp(CmpOp::Eq),
+            NOT_EQ => BinOpKind::Cmp(CmpOp::Ne),
+            LT => BinOpKind::Cmp(CmpOp::Lt),
+            LE => BinOpKind::Cmp(CmpOp::Le),
+            GT => BinOpKind::Cmp(CmpOp::Gt),
+            GE => BinOpKind::Cmp(CmpOp::Ge),
+            EQ_EQ_EQ => BinOpKind::Cmp(CmpOp::Is),
+            NOT_EQ_EQ => BinOpKind::Cmp(CmpOp::IsNot),
+            OR => BinOpKind::BitOr,
+            AND => BinOpKind::BitAnd,
+            CARET => BinOpKind::BitXor,
+            ADD => BinOpKind::Add,
+            SUB => BinOpKind::Sub,
+            MUL => BinOpKind::Mul,
+            DIV => BinOpKind::Div,
+            MODULO => BinOpKind::Mod,
+            LT_LT => BinOpKind::ShiftL,
+            GT_GT => BinOpKind::ArithShiftR,
+            GT_GT_GT => BinOpKind::LogicalShiftR,
             _ => panic!("unimplemented token {:?}", kind),
         };
 
         let span = self.span_from(start);
 
-        Arc::new(ExprData::create_bin(
+        Arc::new(ExprKind::create_bin(
             self.new_node_id(),
             span,
             op,
@@ -1094,22 +1096,23 @@ impl Parser {
         }
     }
 
-    fn parse_lit_bool(&mut self) -> ast::ExprLitBoolType {
+    fn parse_lit_bool(&mut self) -> ast::Lit {
         self.builder.start_node();
         let span = self.current_span();
         let kind = self.current();
         self.assert(kind);
+        let green = self.builder.finish_node(BOOL_LIT_EXPR);
         let value = kind == TRUE;
-        self.builder.finish_node(BOOL_LIT_EXPR);
 
-        ast::ExprLitBoolType {
+        ast::Lit {
             id: self.new_node_id(),
             span,
-            value,
+            green,
+            kind: ast::LitKind::Bool(value),
         }
     }
 
-    fn parse_lit_int(&mut self) -> ast::ExprLitIntType {
+    fn parse_lit_int(&mut self) -> ast::Lit {
         let span = self.current_span();
         self.builder.start_node();
         self.assert(INT_LITERAL);
@@ -1117,15 +1120,15 @@ impl Parser {
 
         let green = self.builder.finish_node(INT_LIT_EXPR);
 
-        ast::ExprLitIntType {
+        ast::Lit {
             id: self.new_node_id(),
             span,
             green,
-            value,
+            kind: ast::LitKind::Int(value),
         }
     }
 
-    fn parse_lit_float(&mut self) -> ast::ExprLitFloatType {
+    fn parse_lit_float(&mut self) -> ast::Lit {
         let span = self.current_span();
         self.builder.start_node();
         self.assert(FLOAT_LITERAL);
@@ -1133,11 +1136,11 @@ impl Parser {
 
         let green = self.builder.finish_node(FLOAT_LIT_EXPR);
 
-        ast::ExprLitFloatType {
+        ast::Lit {
             id: self.new_node_id(),
             span,
             green,
-            value,
+            kind: ast::LitKind::Float(value),
         }
     }
 
@@ -1203,7 +1206,7 @@ impl Parser {
         }
     }
 
-    fn parse_parentheses(&mut self) -> ast::ExprParenType {
+    fn parse_parentheses(&mut self) -> ast::Paren {
         self.start_node();
         self.builder.start_node();
         self.assert(L_PAREN);
@@ -1256,7 +1259,7 @@ impl Parser {
 
             self.expect(R_PAREN);
 
-            ast::ExprParenType {
+            ast::Paren {
                 id: self.new_node_id(),
                 span: self.finish_node(),
                 green,
@@ -1271,10 +1274,10 @@ impl Parser {
         Arc::from(match self.current() {
             L_PAREN => ast::FlowExprData::Paren(self.parse_flow_parentheses()),
             IDENTIFIER => ast::FlowExprData::Ident(self.parse_identifier()),
-            FLOAT_LITERAL => ast::FlowExprData::LitFloat(self.parse_lit_float()),
-            INT_LITERAL => ast::FlowExprData::LitInt(self.parse_lit_int()),
-            TRUE => ast::FlowExprData::LitBool(self.parse_lit_bool()),
-            FALSE => ast::FlowExprData::LitBool(self.parse_lit_bool()),
+            FLOAT_LITERAL => ast::FlowExprData::Lit(self.parse_lit_float()),
+            INT_LITERAL => ast::FlowExprData::Lit(self.parse_lit_int()),
+            TRUE => ast::FlowExprData::Lit(self.parse_lit_bool()),
+            FALSE => ast::FlowExprData::Lit(self.parse_lit_bool()),
             _ => {
                 self.report_error(ParseError::ExpectedFactor);
                 ast::FlowExprData::Error {
@@ -1288,17 +1291,17 @@ impl Parser {
     fn parse_factor(&mut self) -> Expr {
         let span = self.current_span();
         Arc::from(match self.current() {
-            L_PAREN => ExprData::Paren(self.parse_parentheses()),
-            L_BRACE => ExprData::Block(self.parse_block()),
-            INT_LITERAL => ExprData::LitInt(self.parse_lit_int()),
-            FLOAT_LITERAL => ExprData::LitFloat(self.parse_lit_float()),
-            IDENTIFIER => ExprData::Ident(self.parse_identifier()),
-            TRUE => ExprData::LitBool(self.parse_lit_bool()),
-            FALSE => ExprData::LitBool(self.parse_lit_bool()),
-            RETURN_KW => ExprData::Return(self.parse_return()),
+            L_PAREN => ExprKind::Paren(self.parse_parentheses()),
+            L_BRACE => ExprKind::Block(self.parse_block()),
+            INT_LITERAL => ExprKind::Lit(self.parse_lit_int()),
+            FLOAT_LITERAL => ExprKind::Lit(self.parse_lit_float()),
+            IDENTIFIER => ExprKind::Ident(self.parse_identifier()),
+            TRUE => ExprKind::Lit(self.parse_lit_bool()),
+            FALSE => ExprKind::Lit(self.parse_lit_bool()),
+            RETURN_KW => ExprKind::Return(self.parse_return()),
             _ => {
                 self.report_error(ParseError::ExpectedFactor);
-                ExprData::Error {
+                ExprKind::Error {
                     id: self.new_node_id(),
                     span,
                 }
@@ -1412,8 +1415,10 @@ mod tests {
     fn parse_number() {
         let expr = parse_expr("10");
 
-        let lit = expr.to_lit_int().unwrap();
-        assert_eq!(String::from("10"), lit.value);
+        assert_eq!(
+            String::from("10"),
+            *expr.to_lit().unwrap().as_string().unwrap()
+        );
     }
 
     #[test]
@@ -1423,7 +1428,7 @@ mod tests {
         let un = expr.to_un().unwrap();
         assert_eq!(UnOp::Neg, un.op);
 
-        assert!(un.opnd.is_lit_int());
+        assert!(un.opnd.to_lit().unwrap().is_int());
     }
 
     #[test]
@@ -1436,7 +1441,7 @@ mod tests {
         let neg2 = neg1.opnd.to_paren().unwrap().expr.to_un().unwrap();
         assert_eq!(UnOp::Neg, neg2.op);
 
-        assert!(neg2.opnd.is_lit_int());
+        assert!(neg2.opnd.to_lit().unwrap().is_int());
     }
 
     #[test]
@@ -1448,269 +1453,403 @@ mod tests {
     fn parse_mul() {
         let expr = parse_expr("6*3");
 
-        let mul = expr.to_bin().unwrap();
-        assert_eq!(BinOp::Mul, mul.op);
-        assert_eq!(String::from("6"), mul.lhs.to_lit_int().unwrap().value);
-        assert_eq!(String::from("3"), mul.rhs.to_lit_int().unwrap().value);
+        let (mul, lhs, rhs) = expr.to_bin().unwrap();
+        assert_eq!(BinOpKind::Mul, mul.op);
+        assert_eq!(
+            String::from("6"),
+            *lhs.to_lit().unwrap().as_string().unwrap()
+        );
+        assert_eq!(
+            String::from("3"),
+            *rhs.to_lit().unwrap().as_string().unwrap()
+        );
     }
 
     #[test]
     fn parse_multiple_muls() {
         let expr = parse_expr("6*3*4");
 
-        let mul1 = expr.to_bin().unwrap();
-        assert_eq!(BinOp::Mul, mul1.op);
+        let (mul1, lhs1, rhs1) = expr.to_bin().unwrap();
+        assert_eq!(BinOpKind::Mul, mul1.op);
 
-        let mul2 = mul1.lhs.to_bin().unwrap();
-        assert_eq!(BinOp::Mul, mul2.op);
-        assert_eq!(String::from("6"), mul2.lhs.to_lit_int().unwrap().value);
-        assert_eq!(String::from("3"), mul2.rhs.to_lit_int().unwrap().value);
+        let (mul2, lhs2, rhs2) = lhs1.to_bin().unwrap();
+        assert_eq!(BinOpKind::Mul, mul2.op);
+        assert_eq!(
+            String::from("6"),
+            *lhs2.to_lit().unwrap().as_string().unwrap()
+        );
+        assert_eq!(
+            String::from("3"),
+            *rhs2.to_lit().unwrap().as_string().unwrap()
+        );
 
-        assert_eq!(String::from("4"), mul1.rhs.to_lit_int().unwrap().value);
+        assert_eq!(
+            String::from("4"),
+            *rhs1.to_lit().unwrap().as_string().unwrap()
+        );
     }
 
     #[test]
     fn parse_div() {
         let expr = parse_expr("4/5");
 
-        let div = expr.to_bin().unwrap();
-        assert_eq!(BinOp::Div, div.op);
-        assert_eq!(String::from("4"), div.lhs.to_lit_int().unwrap().value);
-        assert_eq!(String::from("5"), div.rhs.to_lit_int().unwrap().value);
+        let (div, lhs, rhs) = expr.to_bin().unwrap();
+        assert_eq!(BinOpKind::Div, div.op);
+        assert_eq!(
+            String::from("4"),
+            *lhs.to_lit().unwrap().as_string().unwrap()
+        );
+        assert_eq!(
+            String::from("5"),
+            *rhs.to_lit().unwrap().as_string().unwrap()
+        );
     }
 
     #[test]
     fn parse_mod() {
         let expr = parse_expr("2%15");
 
-        let div = expr.to_bin().unwrap();
-        assert_eq!(BinOp::Mod, div.op);
-        assert_eq!(String::from("2"), div.lhs.to_lit_int().unwrap().value);
-        assert_eq!(String::from("15"), div.rhs.to_lit_int().unwrap().value);
+        let (div, lhs, rhs) = expr.to_bin().unwrap();
+        assert_eq!(BinOpKind::Mod, div.op);
+        assert_eq!(
+            String::from("2"),
+            *lhs.to_lit().unwrap().as_string().unwrap()
+        );
+        assert_eq!(
+            String::from("15"),
+            *rhs.to_lit().unwrap().as_string().unwrap()
+        );
     }
 
     #[test]
     fn parse_add() {
         let expr = parse_expr("2+3");
 
-        let add = expr.to_bin().unwrap();
-        assert_eq!(BinOp::Add, add.op);
-        assert_eq!(String::from("2"), add.lhs.to_lit_int().unwrap().value);
-        assert_eq!(String::from("3"), add.rhs.to_lit_int().unwrap().value);
+        let (add, lhs, rhs) = expr.to_bin().unwrap();
+        assert_eq!(BinOpKind::Add, add.op);
+        assert_eq!(
+            String::from("2"),
+            *lhs.to_lit().unwrap().as_string().unwrap()
+        );
+        assert_eq!(
+            String::from("3"),
+            *rhs.to_lit().unwrap().as_string().unwrap()
+        );
     }
 
     #[test]
     fn parse_add_left_associativity() {
         let expr = parse_expr("1+2+3");
 
-        let add = expr.to_bin().unwrap();
-        assert_eq!(String::from("3"), add.rhs.to_lit_int().unwrap().value);
+        let (_, lhs, rhs) = expr.to_bin().unwrap();
+        assert_eq!(
+            String::from("3"),
+            *rhs.to_lit().unwrap().as_string().unwrap()
+        );
 
-        let lhs = add.lhs.to_bin().unwrap();
-        assert_eq!(String::from("1"), lhs.lhs.to_lit_int().unwrap().value);
-        assert_eq!(String::from("2"), lhs.rhs.to_lit_int().unwrap().value);
+        let (_, lhs, rhs) = lhs.to_bin().unwrap();
+        assert_eq!(
+            String::from("1"),
+            *lhs.to_lit().unwrap().as_string().unwrap()
+        );
+        assert_eq!(
+            String::from("2"),
+            *rhs.to_lit().unwrap().as_string().unwrap()
+        );
     }
 
     #[test]
     fn parse_add_right_associativity_via_parens() {
         let expr = parse_expr("1+(2+3)");
 
-        let add = expr.to_bin().unwrap();
-        assert_eq!(String::from("1"), add.lhs.to_lit_int().unwrap().value);
+        let (_, lhs, rhs) = expr.to_bin().unwrap();
+        assert_eq!(
+            String::from("1"),
+            *lhs.to_lit().unwrap().as_string().unwrap()
+        );
 
-        let rhs = add.rhs.to_paren().unwrap().expr.to_bin().unwrap();
-        assert_eq!(String::from("2"), rhs.lhs.to_lit_int().unwrap().value);
-        assert_eq!(String::from("3"), rhs.rhs.to_lit_int().unwrap().value);
+        let (_, lhs, rhs) = rhs.to_paren().unwrap().expr.to_bin().unwrap();
+        assert_eq!(
+            String::from("2"),
+            *lhs.to_lit().unwrap().as_string().unwrap()
+        );
+        assert_eq!(
+            String::from("3"),
+            *rhs.to_lit().unwrap().as_string().unwrap()
+        );
     }
 
     #[test]
     fn parse_sub() {
         let expr = parse_expr("1-2");
 
-        let add = expr.to_bin().unwrap();
-        assert_eq!(BinOp::Sub, add.op);
-        assert_eq!(String::from("1"), add.lhs.to_lit_int().unwrap().value);
-        assert_eq!(String::from("2"), add.rhs.to_lit_int().unwrap().value);
+        let (add, lhs, rhs) = expr.to_bin().unwrap();
+        assert_eq!(BinOpKind::Sub, add.op);
+        assert_eq!(
+            String::from("1"),
+            *lhs.to_lit().unwrap().as_string().unwrap()
+        );
+        assert_eq!(
+            String::from("2"),
+            *rhs.to_lit().unwrap().as_string().unwrap()
+        );
     }
 
     #[test]
     fn parse_or() {
         let expr = parse_expr("1||2");
 
-        let add = expr.to_bin().unwrap();
-        assert_eq!(BinOp::Or, add.op);
-        assert_eq!(String::from("1"), add.lhs.to_lit_int().unwrap().value);
-        assert_eq!(String::from("2"), add.rhs.to_lit_int().unwrap().value);
+        let (add, lhs, rhs) = expr.to_bin().unwrap();
+        assert_eq!(BinOpKind::Or, add.op);
+        assert_eq!(
+            String::from("1"),
+            *lhs.to_lit().unwrap().as_string().unwrap()
+        );
+        assert_eq!(
+            String::from("2"),
+            *rhs.to_lit().unwrap().as_string().unwrap()
+        );
     }
 
     #[test]
     fn parse_and() {
         let expr = parse_expr("1&&2");
 
-        let add = expr.to_bin().unwrap();
-        assert_eq!(BinOp::And, add.op);
-        assert_eq!(String::from("1"), add.lhs.to_lit_int().unwrap().value);
-        assert_eq!(String::from("2"), add.rhs.to_lit_int().unwrap().value);
+        let (add, lhs, rhs) = expr.to_bin().unwrap();
+        assert_eq!(BinOpKind::And, add.op);
+        assert_eq!(
+            String::from("1"),
+            *lhs.to_lit().unwrap().as_string().unwrap()
+        );
+        assert_eq!(
+            String::from("2"),
+            *rhs.to_lit().unwrap().as_string().unwrap()
+        );
     }
 
     #[test]
     fn parse_bit_or() {
         let expr = parse_expr("1|2");
 
-        let or = expr.to_bin().unwrap();
-        assert_eq!(BinOp::BitOr, or.op);
-        assert_eq!(String::from("1"), or.lhs.to_lit_int().unwrap().value);
-        assert_eq!(String::from("2"), or.rhs.to_lit_int().unwrap().value);
+        let (or, lhs, rhs) = expr.to_bin().unwrap();
+        assert_eq!(BinOpKind::BitOr, or.op);
+        assert_eq!(
+            String::from("1"),
+            *lhs.to_lit().unwrap().as_string().unwrap()
+        );
+        assert_eq!(
+            String::from("2"),
+            *rhs.to_lit().unwrap().as_string().unwrap()
+        );
     }
 
     #[test]
     fn parse_bit_and() {
         let expr = parse_expr("1&2");
 
-        let and = expr.to_bin().unwrap();
-        assert_eq!(BinOp::BitAnd, and.op);
-        assert_eq!(String::from("1"), and.lhs.to_lit_int().unwrap().value);
-        assert_eq!(String::from("2"), and.rhs.to_lit_int().unwrap().value);
+        let (and, lhs, rhs) = expr.to_bin().unwrap();
+        assert_eq!(BinOpKind::BitAnd, and.op);
+        assert_eq!(
+            String::from("1"),
+            *lhs.to_lit().unwrap().as_string().unwrap()
+        );
+        assert_eq!(
+            String::from("2"),
+            *rhs.to_lit().unwrap().as_string().unwrap()
+        );
     }
 
     #[test]
     fn parse_bit_xor() {
         let expr = parse_expr("1^2");
 
-        let xor = expr.to_bin().unwrap();
-        assert_eq!(BinOp::BitXor, xor.op);
-        assert_eq!(String::from("1"), xor.lhs.to_lit_int().unwrap().value);
-        assert_eq!(String::from("2"), xor.rhs.to_lit_int().unwrap().value);
+        let (xor, lhs, rhs) = expr.to_bin().unwrap();
+        assert_eq!(BinOpKind::BitXor, xor.op);
+        assert_eq!(
+            String::from("1"),
+            *lhs.to_lit().unwrap().as_string().unwrap()
+        );
+        assert_eq!(
+            String::from("2"),
+            *rhs.to_lit().unwrap().as_string().unwrap()
+        );
     }
 
     #[test]
     fn parse_lt() {
         let expr = parse_expr("1<2");
 
-        let cmp = expr.to_bin().unwrap();
-        assert_eq!(BinOp::Cmp(CmpOp::Lt), cmp.op);
-        assert_eq!(String::from("1"), cmp.lhs.to_lit_int().unwrap().value);
-        assert_eq!(String::from("2"), cmp.rhs.to_lit_int().unwrap().value);
+        let (cmp, lhs, rhs) = expr.to_bin().unwrap();
+        assert_eq!(BinOpKind::Cmp(CmpOp::Lt), cmp.op);
+        assert_eq!(
+            String::from("1"),
+            *lhs.to_lit().unwrap().as_string().unwrap()
+        );
+        assert_eq!(
+            String::from("2"),
+            *rhs.to_lit().unwrap().as_string().unwrap()
+        );
     }
 
     #[test]
     fn parse_le() {
         let expr = parse_expr("1<=2");
 
-        let cmp = expr.to_bin().unwrap();
-        assert_eq!(BinOp::Cmp(CmpOp::Le), cmp.op);
-        assert_eq!(String::from("1"), cmp.lhs.to_lit_int().unwrap().value);
-        assert_eq!(String::from("2"), cmp.rhs.to_lit_int().unwrap().value);
+        let (cmp, lhs, rhs) = expr.to_bin().unwrap();
+        assert_eq!(BinOpKind::Cmp(CmpOp::Le), cmp.op);
+        assert_eq!(
+            String::from("1"),
+            *lhs.to_lit().unwrap().as_string().unwrap()
+        );
+        assert_eq!(
+            String::from("2"),
+            *rhs.to_lit().unwrap().as_string().unwrap()
+        );
     }
 
     #[test]
     fn parse_gt() {
         let expr = parse_expr("1>2");
 
-        let cmp = expr.to_bin().unwrap();
-        assert_eq!(BinOp::Cmp(CmpOp::Gt), cmp.op);
-        assert_eq!(String::from("1"), cmp.lhs.to_lit_int().unwrap().value);
-        assert_eq!(String::from("2"), cmp.rhs.to_lit_int().unwrap().value);
+        let (cmp, lhs, rhs) = expr.to_bin().unwrap();
+        assert_eq!(BinOpKind::Cmp(CmpOp::Gt), cmp.op);
+        assert_eq!(
+            String::from("1"),
+            *lhs.to_lit().unwrap().as_string().unwrap()
+        );
+        assert_eq!(
+            String::from("2"),
+            *rhs.to_lit().unwrap().as_string().unwrap()
+        );
     }
 
     #[test]
     fn parse_ge() {
         let expr = parse_expr("1>=2");
 
-        let cmp = expr.to_bin().unwrap();
-        assert_eq!(BinOp::Cmp(CmpOp::Ge), cmp.op);
-        assert_eq!(String::from("1"), cmp.lhs.to_lit_int().unwrap().value);
-        assert_eq!(String::from("2"), cmp.rhs.to_lit_int().unwrap().value);
+        let (cmp, lhs, rhs) = expr.to_bin().unwrap();
+        assert_eq!(BinOpKind::Cmp(CmpOp::Ge), cmp.op);
+        assert_eq!(
+            String::from("1"),
+            *lhs.to_lit().unwrap().as_string().unwrap()
+        );
+        assert_eq!(
+            String::from("2"),
+            *rhs.to_lit().unwrap().as_string().unwrap()
+        );
     }
 
     #[test]
     fn parse_eq() {
         let expr = parse_expr("1==2");
 
-        let cmp = expr.to_bin().unwrap();
-        assert_eq!(BinOp::Cmp(CmpOp::Eq), cmp.op);
-        assert_eq!(String::from("1"), cmp.lhs.to_lit_int().unwrap().value);
-        assert_eq!(String::from("2"), cmp.rhs.to_lit_int().unwrap().value);
+        let (cmp, lhs, rhs) = expr.to_bin().unwrap();
+        assert_eq!(BinOpKind::Cmp(CmpOp::Eq), cmp.op);
+        assert_eq!(
+            String::from("1"),
+            *lhs.to_lit().unwrap().as_string().unwrap()
+        );
+        assert_eq!(
+            String::from("2"),
+            *rhs.to_lit().unwrap().as_string().unwrap()
+        );
     }
 
     #[test]
     fn parse_ne() {
         let expr = parse_expr("1!=2");
 
-        let cmp = expr.to_bin().unwrap();
-        assert_eq!(BinOp::Cmp(CmpOp::Ne), cmp.op);
-        assert_eq!(String::from("1"), cmp.lhs.to_lit_int().unwrap().value);
-        assert_eq!(String::from("2"), cmp.rhs.to_lit_int().unwrap().value);
+        let (cmp, lhs, rhs) = expr.to_bin().unwrap();
+        assert_eq!(BinOpKind::Cmp(CmpOp::Ne), cmp.op);
+        assert_eq!(
+            String::from("1"),
+            *lhs.to_lit().unwrap().as_string().unwrap()
+        );
+        assert_eq!(
+            String::from("2"),
+            *rhs.to_lit().unwrap().as_string().unwrap()
+        );
     }
 
     #[test]
     fn parse_identity_not() {
         let expr = parse_expr("1!==2");
 
-        let cmp = expr.to_bin().unwrap();
-        assert_eq!(BinOp::Cmp(CmpOp::IsNot), cmp.op);
-        assert_eq!(String::from("1"), cmp.lhs.to_lit_int().unwrap().value);
-        assert_eq!(String::from("2"), cmp.rhs.to_lit_int().unwrap().value);
+        let (cmp, lhs, rhs) = expr.to_bin().unwrap();
+        assert_eq!(BinOpKind::Cmp(CmpOp::IsNot), cmp.op);
+        assert_eq!(
+            String::from("1"),
+            *lhs.to_lit().unwrap().as_string().unwrap()
+        );
+        assert_eq!(
+            String::from("2"),
+            *rhs.to_lit().unwrap().as_string().unwrap()
+        );
     }
 
     #[test]
     fn parse_identity() {
         let expr = parse_expr("1===2");
 
-        let cmp = expr.to_bin().unwrap();
-        assert_eq!(BinOp::Cmp(CmpOp::Is), cmp.op);
-        assert_eq!(String::from("1"), cmp.lhs.to_lit_int().unwrap().value);
-        assert_eq!(String::from("2"), cmp.rhs.to_lit_int().unwrap().value);
+        let (cmp, lhs, rhs) = expr.to_bin().unwrap();
+        assert_eq!(BinOpKind::Cmp(CmpOp::Is), cmp.op);
+        assert_eq!(
+            String::from("1"),
+            *lhs.to_lit().unwrap().as_string().unwrap()
+        );
+        assert_eq!(
+            String::from("2"),
+            *rhs.to_lit().unwrap().as_string().unwrap()
+        );
     }
 
     #[test]
     fn parse_true() {
         let expr = parse_expr("true");
-
-        let lit = expr.to_lit_bool().unwrap();
-        assert_eq!(true, lit.value);
+        assert_eq!(true, expr.to_lit().unwrap().as_bool().unwrap());
     }
 
     #[test]
     fn parse_false() {
         let expr = parse_expr("true");
-
-        let lit = expr.to_lit_bool().unwrap();
-        assert_eq!(true, lit.value);
+        assert_eq!(true, expr.to_lit().unwrap().as_bool().unwrap());
     }
 
     #[test]
     fn parse_assign() {
         let expr = parse_expr("a=4");
 
-        let assign = expr.to_bin().unwrap();
-        assert!(assign.lhs.is_ident());
-        assert_eq!(BinOp::Assign, assign.op);
-        assert_eq!(String::from("4"), assign.rhs.to_lit_int().unwrap().value);
+        let (assign, lhs, rhs) = expr.to_bin().unwrap();
+        assert!(lhs.is_ident());
+        assert_eq!(BinOpKind::Assign, assign.op);
+        assert_eq!(
+            String::from("4"),
+            *rhs.to_lit().unwrap().as_string().unwrap()
+        );
     }
 
     #[test]
     fn parse_shift_right() {
         let expr = parse_expr("a>>4");
 
-        let bin = expr.to_bin().unwrap();
-        assert_eq!(BinOp::ArithShiftR, bin.op);
+        let (bin, _, _) = expr.to_bin().unwrap();
+        assert_eq!(BinOpKind::ArithShiftR, bin.op);
     }
 
     #[test]
     fn parse_unsigned_shift_right() {
         let expr = parse_expr("a>>>4");
 
-        let bin = expr.to_bin().unwrap();
-        assert_eq!(BinOp::LogicalShiftR, bin.op);
+        let (bin, _, _) = expr.to_bin().unwrap();
+        assert_eq!(BinOpKind::LogicalShiftR, bin.op);
     }
 
     #[test]
     fn parse_left() {
         let expr = parse_expr("a<<4");
 
-        let bin = expr.to_bin().unwrap();
-        assert_eq!(BinOp::ShiftL, bin.op);
+        let (bin, _, _) = expr.to_bin().unwrap();
+        assert_eq!(BinOpKind::ShiftL, bin.op);
     }
 
     #[test]
@@ -1762,8 +1901,8 @@ mod tests {
         let fct = prog.fct0();
 
         assert_eq!("b", fct.name.as_ref().unwrap().name_as_string);
-        assert_eq!(0, fct.params.len());
-        assert!(fct.return_type.is_none());
+        assert_eq!(0, fct.sig.inputs.len());
+        assert!(fct.sig.output.is_none());
     }
 
     #[test]
@@ -1774,11 +1913,11 @@ mod tests {
         let p2 = parse("fn f(a:int,) { }");
         let f2 = p2.fct0();
 
-        assert_eq!(f1.params.len(), 1);
-        assert_eq!(f2.params.len(), 1);
+        assert_eq!(f1.sig.inputs.len(), 1);
+        assert_eq!(f2.sig.inputs.len(), 1);
 
-        let p1 = &f1.params[0];
-        let p2 = &f2.params[0];
+        let p1 = &f1.sig.inputs[0];
+        let p2 = &f2.sig.inputs[0];
 
         assert_eq!("a", p1.name.as_ref().unwrap().name_as_string);
         assert_eq!("a", p2.name.as_ref().unwrap().name_as_string);
@@ -1795,10 +1934,10 @@ mod tests {
         let p2 = parse("fn f(a:int, b:str,) { }");
         let f2 = p2.fct0();
 
-        let p1a = &f1.params[0];
-        let p1b = &f1.params[1];
-        let p2a = &f2.params[0];
-        let p2b = &f2.params[1];
+        let p1a = &f1.sig.inputs[0];
+        let p1b = &f1.sig.inputs[1];
+        let p2a = &f2.sig.inputs[0];
+        let p2b = &f2.sig.inputs[1];
 
         assert_eq!("a", p1a.name.as_ref().unwrap().name_as_string);
         assert_eq!("a", p2a.name.as_ref().unwrap().name_as_string);
@@ -1835,7 +1974,15 @@ mod tests {
     #[test]
     fn parse_block() {
         let expr = parse_expr("{1}");
-        assert!(expr.to_block().unwrap().expr.as_ref().unwrap().is_lit_int());
+        assert!(expr
+            .to_block()
+            .unwrap()
+            .expr
+            .as_ref()
+            .unwrap()
+            .to_lit()
+            .unwrap()
+            .is_int());
 
         let expr = parse_expr("({}) + 1");
         assert!(expr.is_bin());
@@ -1852,11 +1999,21 @@ mod tests {
         assert_eq!(1, block.stmts.len());
 
         let expr = &block.stmts[0].to_expr().unwrap().expr;
-        assert_eq!(String::from("1"), expr.to_lit_int().unwrap().value);
+        assert_eq!(
+            &String::from("1"),
+            expr.to_lit().unwrap().as_string().unwrap()
+        );
 
         assert_eq!(
-            String::from("2"),
-            block.expr.as_ref().unwrap().to_lit_int().unwrap().value
+            &String::from("2"),
+            block
+                .expr
+                .as_ref()
+                .unwrap()
+                .to_lit()
+                .unwrap()
+                .as_string()
+                .unwrap()
         );
     }
 
@@ -1868,10 +2025,16 @@ mod tests {
         assert_eq!(2, block.stmts.len());
 
         let expr = &block.stmts[0].to_expr().unwrap().expr;
-        assert_eq!(String::from("1"), expr.to_lit_int().unwrap().value);
+        assert_eq!(
+            String::from("1"),
+            *expr.to_lit().unwrap().as_string().unwrap()
+        );
 
         let expr = &block.stmts[1].to_expr().unwrap().expr;
-        assert_eq!(String::from("2"), expr.to_lit_int().unwrap().value);
+        assert_eq!(
+            String::from("2"),
+            *expr.to_lit().unwrap().as_string().unwrap()
+        );
 
         assert!(block.expr.is_none());
     }
@@ -1883,7 +2046,11 @@ mod tests {
 
         assert_eq!(
             String::from("1"),
-            ret.expr.as_ref().unwrap().to_lit_int().unwrap().value
+            *ret.expr
+                .as_ref()
+                .and_then(|v| v.to_lit())
+                .and_then(|v| v.as_string())
+                .unwrap()
         );
     }
 
@@ -1904,13 +2071,11 @@ mod tests {
     #[test]
     fn parse_flow_with_return_type() {
         let p1 = parse("flow f(a:int, b:str) -> Best { }");
-        let f1 = p1.flow(0);
     }
 
     #[test]
     fn parse_flow_with_nodes_block() {
         let p1 = parse("flow f(a:int, b:str) -> Out { node in: in; }");
-        let f1 = p1.flow(0);
     }
 
     #[test]
@@ -1923,7 +2088,6 @@ mod tests {
             in.then -> out;
         }"#,
         );
-        let f1 = p1.flow(0);
     }
 
     #[test]
@@ -1938,7 +2102,6 @@ mod tests {
             false -> out.test;
         }"#,
         );
-        let f1 = p1.flow(0);
     }
 
     #[test]
@@ -1953,7 +2116,5 @@ mod tests {
             (entry.a -> gt.a, entry.b -> gt.b) -> branch.cond;
         }"#,
         );
-        let f1 = p1.flow(0);
-        println!("{:#?}", f1);
     }
 }

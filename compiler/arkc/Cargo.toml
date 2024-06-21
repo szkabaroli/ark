@@ -1,0 +1,22 @@
+[package]
+authors = []
+edition = "2021"
+name = "arkc"
+version = "0.0.2"
+
+[dependencies]
+anstyle = "1.0"
+#arkc-codegen-llvm = {path = "../arkc-codegen-llvm", optional = true}
+arkc-frontend-alt = {path = "../arkc-frontend-alt"}
+bincode = "2.0.0-rc.3"
+bytecode = {path = "../arkc-bytecode"}
+clap = {version = "4.5", features = ["derive"]}
+id-arena="*"
+
+[profile.release]
+lto = true
+panic = 'abort'
+
+[features]
+#default = ["llvm"]
+#llvm = ["arkc-codegen-llvm"]

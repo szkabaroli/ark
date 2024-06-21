@@ -1,26 +1,28 @@
 use error::msg::ErrorMessage;
-pub use interner::Name;
 use parser::{ast, Span};
-use sema::{Sema, SourceFileId};
+
+pub use interner::Name;
+pub use sema::{Sema, SourceFileId};
 pub use sym::{SymTable, Symbol, SymbolKind};
 pub use ty::{SourceType, SourceTypeArray};
 
-#[cfg(test)]
-pub mod test;
-
-pub mod generator;
-pub mod typecheck;
+pub mod return_check;
 pub mod sema;
+pub mod specialize;
+pub mod sym;
+pub mod test;
+pub mod ty;
+pub mod typecheck;
+//pub mod hir;
+//pub mod hir_id;
+
 mod error;
 mod fctdef_check;
 mod import_check;
 mod interner;
 mod program_parser;
-mod specialize;
-mod stdlib_lookup;
-mod sym;
-mod ty;
 mod readty;
+mod stdlib_lookup;
 
 pub const STDLIB: &[(&str, &str)] = &include!(concat!(env!("OUT_DIR"), "/dora_stdlib_bundle.rs"));
 
@@ -35,7 +37,6 @@ macro_rules! return_on_error {
 pub fn check_program(sa: &mut Sema) -> bool {
     // This phase loads and parses all files. Also creates top-level-elements.
     let module_symtables = program_parser::parse(sa);
-    println!("{:#?}", module_symtables);
 
     // Discover all imported types.
     import_check::check(sa, module_symtables);
@@ -114,11 +115,10 @@ pub fn report_sym_shadow_span(sa: &Sema, name: Name, file: SourceFileId, span: S
 }
 
 pub fn always_returns(s: &ast::StmtData) -> bool {
-    todo!()
-    //returnck::returns_value(s).is_ok()
+    return_check::returns_value(s).is_ok()
 }
 
-pub fn expr_always_returns(e: &ast::ExprData) -> bool {
+pub fn expr_always_returns(e: &ast::ExprKind) -> bool {
     todo!()
     //returnck::expr_returns_value(e).is_ok()
 }
@@ -126,4 +126,93 @@ pub fn expr_always_returns(e: &ast::ExprData) -> bool {
 pub fn expr_block_always_returns(e: &ast::ExprBlockType) -> bool {
     todo!()
     // returnck::expr_block_returns_value(e).is_ok()
+}
+
+fn function_pattern_match(name: &str, pattern: &str) -> bool {
+    if pattern == "all" {
+        return true;
+    }
+
+    for part in pattern.split(',') {
+        if name.contains(part) {
+            return true;
+        }
+    }
+
+    false
+}
+
+pub fn emit_ast(sa: &Sema, filter: &str) {
+    for (_id, function) in sa.functions.iter() {
+        let function_name = function.display_name(sa);
+
+        if function_pattern_match(&function_name, filter) {
+            ast::dump::dump_function(&function.ast);
+        }
+    }
+}
+
+#[cfg(test)]
+pub mod tests {
+    use crate::error::msg::{ErrorDescriptor, ErrorMessage};
+    use crate::sema::Sema;
+    use crate::test;
+    use parser::{compute_line_column, compute_line_starts};
+
+    pub fn ok(code: &'static str) {
+        test::check(code, |vm| {
+            let diag = vm.diag.borrow();
+            let errors = diag.errors();
+
+            for e in errors {
+                println!("{}", e.message(vm));
+                println!("{:?}", e);
+                println!();
+            }
+
+            assert!(!diag.has_errors(), "program should not have errors.");
+        });
+    }
+
+    pub fn err(code: &'static str, loc: (u32, u32), msg: ErrorMessage) {
+        test::check(code, |vm| {
+            let diag = vm.diag.borrow();
+            let errors = diag.errors();
+
+            let error_loc = if errors.len() == 1 {
+                compute_pos(code, &errors[0])
+            } else {
+                None
+            };
+
+            if errors.len() != 1 || error_loc != Some(loc) || errors[0].msg != msg {
+                println!("expected:");
+                println!("\t{:?} at {}:{}", msg, loc.0, loc.1);
+                println!();
+                if errors.is_empty() {
+                    println!("but got no error.");
+                    println!();
+                } else {
+                    println!("but got:");
+                    for error in errors {
+                        println!("\t{:?} at {:?}", error.msg, compute_pos(code, error));
+                        println!();
+                    }
+                }
+            }
+
+            assert_eq!(1, errors.len(), "found {} errors instead", errors.len());
+            assert_eq!(Some(loc), error_loc);
+            assert_eq!(msg, errors[0].msg);
+        });
+    }
+
+    fn compute_pos(code: &str, error: &ErrorDescriptor) -> Option<(u32, u32)> {
+        if let Some(span) = error.span {
+            let line_starts = compute_line_starts(code);
+            Some(compute_line_column(&line_starts, span.start()))
+        } else {
+            None
+        }
+    }
 }

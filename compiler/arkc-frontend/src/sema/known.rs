@@ -1,5 +1,4 @@
 use crate::sema::FctDefinitionId;
-use crate::ty::{SourceType, SourceTypeArray};
 
 #[derive(Debug)]
 pub struct KnownElements {

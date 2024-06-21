@@ -131,12 +131,13 @@ fn determine_suffix_type_int_literal(
 pub fn check_lit_int(
     sa: &Sema,
     file: SourceFileId,
-    e: &ast::ExprLitIntType,
+    span: Span,
+    value: &String,
     negate: bool,
     expected_type: SourceType,
 ) -> (SourceType, i64, f64) {
-    let (base, value, suffix) = parse_lit_int(&e.value);
-    let suffix_type = determine_suffix_type_int_literal(sa, file, e.span, &suffix);
+    let (base, value, suffix) = parse_lit_int(&value);
+    let suffix_type = determine_suffix_type_int_literal(sa, file, span, &suffix);
 
     let ty = suffix_type.unwrap_or_else(|| match expected_type {
         SourceType::UInt8 if !negate => SourceType::UInt8,
@@ -150,14 +151,14 @@ pub fn check_lit_int(
         let value = if negate { -value } else { value };
 
         if base != 10 {
-            sa.report(file, e.span, ErrorMessage::InvalidNumberFormat);
+            sa.report(file, span, ErrorMessage::InvalidNumberFormat);
         }
 
         return (ty, 0, value);
     }
 
     if negate && ty == SourceType::UInt8 {
-        sa.report(file, e.span, ErrorMessage::NegativeUnsigned);
+        sa.report(file, span, ErrorMessage::NegativeUnsigned);
     }
 
     let ty_name = ty.name(sa);
@@ -166,7 +167,7 @@ pub fn check_lit_int(
     let value = match parsed_value {
         Ok(value) => value,
         Err(_) => {
-            sa.report(file, e.span, ErrorMessage::NumberLimitOverflow);
+            sa.report(file, span, ErrorMessage::NumberLimitOverflow);
             return (ty, 0, 0.0);
         }
     };
@@ -180,7 +181,7 @@ pub fn check_lit_int(
         };
 
         if (negate && value > max) || (!negate && value >= max) {
-            sa.report(file, e.span, ErrorMessage::NumberOverflow(ty_name.into()));
+            sa.report(file, span, ErrorMessage::NumberOverflow(ty_name.into()));
         }
 
         let value = if negate {
@@ -201,7 +202,7 @@ pub fn check_lit_int(
         };
 
         if value > max {
-            sa.report(file, e.span, ErrorMessage::NumberOverflow(ty_name.into()));
+            sa.report(file, span, ErrorMessage::NumberOverflow(ty_name.into()));
         }
 
         (ty, value as i64, 0.0)
@@ -211,13 +212,14 @@ pub fn check_lit_int(
 pub fn check_lit_float(
     sa: &Sema,
     file: SourceFileId,
-    e: &ast::ExprLitFloatType,
+    span: Span,
+    value: &String,
     negate: bool,
 ) -> (SourceType, f64) {
-    let (base, value, suffix) = parse_lit_float(&e.value);
+    let (base, value, suffix) = parse_lit_float(&value);
 
     if base != 10 {
-        sa.report(file, e.span, ErrorMessage::InvalidNumberFormat);
+        sa.report(file, span, ErrorMessage::InvalidNumberFormat);
     }
 
     let ty = match suffix.as_str() {
@@ -225,7 +227,7 @@ pub fn check_lit_float(
         "f64" => SourceType::Float64,
         "" => SourceType::Float64,
         _ => {
-            sa.report(file, e.span, ErrorMessage::UnknownSuffix);
+            sa.report(file, span, ErrorMessage::UnknownSuffix);
             SourceType::Float64
         }
     };
@@ -245,7 +247,7 @@ pub fn check_lit_float(
             SourceType::Float64 => "Float64",
             _ => unreachable!(),
         };
-        sa.report(file, e.span, ErrorMessage::NumberOverflow(name.into()));
+        sa.report(file, span, ErrorMessage::NumberOverflow(name.into()));
     }
 
     (ty, value)
@@ -279,7 +281,7 @@ pub struct TypeCheck<'a> {
 }
 
 impl<'a> TypeCheck<'a> {
-    pub fn check_fct(&mut self, ast: &ast::Function) {
+    pub fn check_fct(&mut self, ast: &ast::FnItem) {
         self.check_common(|self_| {
             //self_.add_type_params();
             self_.add_params(ast);
@@ -303,21 +305,26 @@ impl<'a> TypeCheck<'a> {
         self.leave_function_scope();
     }
 
-    fn add_params(&mut self, ast: &ast::Function) {
+    fn add_params(&mut self, ast: &ast::FnItem) {
         self.add_hidden_parameter_self();
 
         let self_count = if self.has_hidden_self_argument { 1 } else { 0 };
-        assert_eq!(ast.params.len() + self_count, self.param_types.len());
+        assert_eq!(
+            ast.sig.decl.inputs.len() + self_count,
+            self.param_types.len()
+        );
 
         for (ind, (param, ty)) in ast
-            .params
+            .sig
+            .decl
+            .inputs
             .iter()
             .zip(self.param_types.iter().skip(self_count))
             .enumerate()
         {
             // is this last argument of function with variadic arguments?
-            let ty = if ind == ast.params.len() - 1
-                && ast.params.last().expect("missing param").variadic
+            let ty = if ind == ast.sig.decl.inputs.len() - 1
+                && ast.sig.decl.inputs.last().expect("missing param").variadic
             {
                 todo!();
                 // type of variable is Array<T>
@@ -384,7 +391,7 @@ impl<'a> TypeCheck<'a> {
         )
     }
 
-    fn check_body(&mut self, ast: &ast::Function) {
+    fn check_body(&mut self, ast: &ast::FnItem) {
         let block = ast.block.as_ref().expect("missing block");
         let fct_return_type = self
             .return_type
@@ -392,7 +399,7 @@ impl<'a> TypeCheck<'a> {
             .expect("missing return type")
             .clone();
 
-        if let ast::ExprData::Block(ref block) = block.as_ref() {
+        if let ast::ExprKind::Block(ref block) = block.as_ref() {
             let mut returns = false;
 
             for stmt in &block.stmts {

@@ -58,7 +58,7 @@ pub fn check(sa: &Sema) {
             FctParent::Function => unreachable!(),
         }
 
-        for p in &ast.params {
+        for p in &ast.sig.decl.inputs {
             if fct.is_variadic.get() {
                 sa.report(
                     fct.file_id,
@@ -78,7 +78,7 @@ pub fn check(sa: &Sema) {
 
         assert!(fct.param_types.set(param_types).is_ok());
 
-        let return_type = if let Some(ret) = ast.return_type.as_ref() {
+        let return_type = if let Some(ret) = ast.sig.decl.output.as_ref() {
             process_type(sa, fct, &sym_table, ret)
         } else {
             SourceType::Unit

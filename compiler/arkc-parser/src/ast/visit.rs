@@ -5,7 +5,7 @@ pub trait Visitor: Sized {
         walk_file(self, a);
     }
 
-    fn visit_fct(&mut self, f: &Arc<Function>) {
+    fn visit_fct(&mut self, f: &Arc<FnItem>) {
         walk_fct(self, &f);
     }
 
@@ -25,7 +25,7 @@ pub trait Visitor: Sized {
         walk_stmt(self, s);
     }
 
-    fn visit_expr(&mut self, e: &ExprData) {
+    fn visit_expr(&mut self, e: &ExprKind) {
         walk_expr(self, e);
     }
 }
@@ -56,12 +56,12 @@ pub fn walk_elem<V: Visitor>(v: &mut V, e: &ElemData) {
     }
 }
 
-pub fn walk_fct<V: Visitor>(v: &mut V, f: &Function) {
-    for p in &f.params {
+pub fn walk_fct<V: Visitor>(v: &mut V, f: &FnItem) {
+    for p in &f.sig.inputs {
         v.visit_param(p);
     }
 
-    if let Some(ref ty) = f.return_type {
+    if let Some(ref ty) = f.sig.output {
         v.visit_type(ty);
     }
 
@@ -127,18 +127,18 @@ pub fn walk_stmt<V: Visitor>(v: &mut V, s: &StmtData) {
     }
 }
 
-pub fn walk_expr<V: Visitor>(v: &mut V, e: &ExprData) {
+pub fn walk_expr<V: Visitor>(v: &mut V, e: &ExprKind) {
     match *e {
-        ExprData::Un(ref value) => {
+        ExprKind::Un(ref value) => {
             v.visit_expr(&value.opnd);
         }
 
-        ExprData::Bin(ref value) => {
-            v.visit_expr(&value.lhs);
-            v.visit_expr(&value.rhs);
+        ExprKind::Bin(_, ref lhs, ref rhs) => {
+            v.visit_expr(lhs);
+            v.visit_expr(rhs);
         }
 
-        ExprData::Call(ref call) => {
+        ExprKind::Call(ref call) => {
             v.visit_expr(&call.callee);
 
             for arg in &call.args {
@@ -153,12 +153,12 @@ pub fn walk_expr<V: Visitor>(v: &mut V, e: &ExprData) {
         //        v.visit_type(arg);
         //    }
         //}
-        ExprData::Path(ref path) => {
+        ExprKind::Path(ref path) => {
             v.visit_expr(&path.lhs);
             v.visit_expr(&path.rhs);
         }
 
-        ExprData::Dot(ref value) => {
+        ExprKind::Dot(ref value) => {
             v.visit_expr(&value.lhs);
             v.visit_expr(&value.rhs);
         }
@@ -173,7 +173,7 @@ pub fn walk_expr<V: Visitor>(v: &mut V, e: &ExprData) {
         //}
 
         //ExprData::Lambda(ref fct) => v.visit_fct(fct),
-        ExprData::Block(ref value) => {
+        ExprKind::Block(ref value) => {
             for stmt in &value.stmts {
                 v.visit_stmt(stmt);
             }
@@ -213,14 +213,14 @@ pub fn walk_expr<V: Visitor>(v: &mut V, e: &ExprData) {
         //        v.visit_expr(expr);
         //    }
         //}
-        ExprData::Paren(ref value) => {
+        ExprKind::Paren(ref value) => {
             v.visit_expr(&value.expr);
         }
 
         //ExprData::Match(ref value) => {
         //    v.visit_expr(&value.expr);
         //}
-        ExprData::Return(ref value) => {
+        ExprKind::Return(ref value) => {
             if let Some(ref e) = value.expr {
                 v.visit_expr(e);
             }
@@ -230,12 +230,8 @@ pub fn walk_expr<V: Visitor>(v: &mut V, e: &ExprData) {
         //ExprData::Continue(_) => {}
 
         //ExprData::This(_) => {}
-        ExprData::LitChar(_) => {}
-        ExprData::LitInt(_) => {}
-        ExprData::LitFloat(_) => {}
-        //ExprData::LitStr(_) => {}
-        ExprData::LitBool(_) => {}
-        ExprData::Ident(_) => {}
-        ExprData::Error { .. } => {}
+        ExprKind::Lit(_) => {}
+        ExprKind::Ident(_) => {}
+        ExprKind::Error { .. } => {}
     }
 }

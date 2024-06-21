@@ -79,24 +79,24 @@ pub fn replace_type(
             }
         }
 
-        //SourceType::Lambda(params, return_type) => {
-        //    let new_params = SourceTypeArray::with(
-        //        params
-        //            .iter()
-        //            .map(|p| replace_type(sa, p, type_params, self_ty.clone(), alias_map.clone()))
-        //            .collect::<Vec<_>>(),
-        //    );
+        SourceType::Function(params, return_type) => {
+            let new_params = SourceTypeArray::with(
+                params
+                    .iter()
+                    .map(|p| replace_type(sa, p, type_params, self_ty.clone(), alias_map.clone()))
+                    .collect::<Vec<_>>(),
+            );
 
-        //    let return_type = replace_type(
-        //        sa,
-        //        return_type.as_ref().clone(),
-        //        type_params,
-        //        self_ty.clone(),
-        //        alias_map,
-        //    );
+            let return_type = replace_type(
+                sa,
+                return_type.as_ref().clone(),
+                type_params,
+                self_ty.clone(),
+                alias_map,
+            );
 
-        //    SourceType::Lambda(new_params, Box::new(return_type))
-        //}
+            SourceType::Function(new_params, Box::new(return_type))
+        }
 
         //SourceType::Tuple(subtypes) => {
         //    let new_subtypes = subtypes

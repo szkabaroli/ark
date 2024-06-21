@@ -7,7 +7,7 @@ use id_arena::Id;
 use parser::ast;
 use parser::Span;
 
-use crate::generator::bty_from_ty;
+//use crate::generator::bty_from_ty;
 use crate::sema::{
     module_path, AnalysisData, ModuleDefinitionId, PackageDefinitionId, Sema, SourceFileId,
     Visibility,
@@ -22,7 +22,7 @@ pub struct FctDefinition {
     pub package_id: PackageDefinitionId,
     pub module_id: ModuleDefinitionId,
     pub file_id: SourceFileId,
-    pub ast: Arc<ast::Function>,
+    pub ast: Arc<ast::FnItem>,
     pub declaration_span: Span,
     pub span: Span,
     pub name: Name,
@@ -52,7 +52,7 @@ impl FctDefinition {
         package_id: PackageDefinitionId,
         module_id: ModuleDefinitionId,
         file_id: SourceFileId,
-        ast: &Arc<ast::Function>,
+        ast: &Arc<ast::FnItem>,
         modifiers: ParsedModifierList,
         name: Name,
         parent: FctParent,
@@ -199,14 +199,14 @@ impl FctDefinition {
         }
     }
 
-    pub fn params_with_self_bty(&self) -> BytecodeTypeArray {
-        let params = self
-            .params_with_self()
-            .iter()
-            .map(|ty| bty_from_ty(ty.clone()))
-            .collect();
-        BytecodeTypeArray::new(params)
-    }
+    //pub fn params_with_self_bty(&self) -> BytecodeTypeArray {
+    //    let params = self
+    //        .params_with_self()
+    //        .iter()
+    //        .map(|ty| bty_from_ty(ty.clone()))
+    //        .collect();
+    //    BytecodeTypeArray::new(params)
+    //}
 
     pub fn return_type(&self) -> SourceType {
         self.return_type
@@ -215,9 +215,9 @@ impl FctDefinition {
             .expect("missing return type")
     }
 
-    pub fn return_type_bty(&self) -> BytecodeType {
-        bty_from_ty(self.return_type())
-    }
+    //pub fn return_type_bty(&self) -> BytecodeType {
+    //    bty_from_ty(self.return_type())
+    //}
 }
 
 /*fn path_for_type(sa: &Sema, ty: SourceType) -> String {

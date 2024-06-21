@@ -1,0 +1,19 @@
+use std::cell::OnceCell;
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use crate::hir::{ModuleDefinitionId, PackageDefinitionId};
+use parser::ast;
+use id_arena::Id;
+
+pub type SourceFileId = Id<SourceFile>;
+
+pub struct SourceFile {
+    pub id: OnceCell<SourceFileId>,
+    pub package_id: PackageDefinitionId,
+    pub module_id: ModuleDefinitionId,
+    pub path: PathBuf,
+    pub content: Arc<String>,
+    pub line_starts: Vec<u32>,
+    pub ast: OnceCell<Arc<ast::File>>,
+}

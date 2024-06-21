@@ -1,10 +1,13 @@
 [workspace]
-resolver = "2"
 members = [
-  "vm",
   "flow-parser",
   "ark-language-server",
+  "compiler/arkc",
+  "compiler/arkc-codegen-llvm",
+  "compiler/arkc-codegen-bc",
   "compiler/arkc-frontend",
+  "compiler/arkc-frontend-alt",
   "compiler/arkc-parser",
   "compiler/arkc-bytecode",
 ]
+resolver = "2"

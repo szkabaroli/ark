@@ -2,20 +2,21 @@ use std::cell::OnceCell;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::io::{Error, Read};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::error::msg::ErrorMessage;
+use crate::hir::{
+    FnDefinition, ModuleDefinition, ModuleDefinitionId, PackageDefinition, PackageDefinitionId,
+    PackageName, SourceFile, SourceFileId,
+};
 use crate::interner::Name;
 use crate::report_sym_shadow_span;
-use crate::sema::{
-    FctDefinition, FctParent, ModuleDefinition, ModuleDefinitionId, PackageDefinition,
-    PackageDefinitionId, PackageName, Sema, SourceFile, SourceFileId, Visibility,
-};
+use crate::sema::Sema;
 use crate::sym::{SymTable, Symbol, SymbolKind};
-use crate::STDLIB;
+
 use parser::ast::visit::Visitor;
-use parser::ast::{self, visit, ModifierList};
+use parser::ast::{self, visit};
 use parser::parser::Parser;
 use parser::{compute_line_starts, Span};
 
@@ -28,13 +29,13 @@ pub fn parse(sa: &mut Sema) -> HashMap<ModuleDefinitionId, SymTable> {
 #[derive(Copy, Clone)]
 enum FileLookup {
     FileSystem,
-    Bundle,
+    // Bundle,
 }
 
 struct ProgramParser<'a> {
     sa: &'a mut Sema,
-    files_to_parse: VecDeque<(SourceFileId, FileLookup, Option<PathBuf>)>,
-    packages: HashMap<String, PathBuf>,
+    files_to_parse: VecDeque<(SourceFileId, Option<PathBuf>)>,
+    packages: HashMap<String, Vec<PathBuf>>,
     module_symtables: HashMap<ModuleDefinitionId, SymTable>,
 }
 
@@ -52,8 +53,12 @@ impl<'a> ProgramParser<'a> {
         self.prepare_packages();
         self.add_all_packages();
 
-        while let Some((file_id, file_lookup, module_path)) = self.files_to_parse.pop_front() {
-            self.parse_file(file_id, file_lookup, module_path);
+        while let Some((file_id, module_path)) = self.files_to_parse.pop_front() {
+            let file = self.sa.file(file_id);
+            let package_id = file.package_id;
+            let module_id = file.module_id;
+            let ast = self.parse_file(file, file_id, module_path.clone());
+            self.scan_file(package_id, module_id, file_id, module_path, &ast);
         }
     }
 
@@ -70,13 +75,13 @@ impl<'a> ProgramParser<'a> {
     }
 
     fn add_all_packages(&mut self) {
-        self.add_stdlib_package();
-        //self.add_boots_package();
+        // self.add_stdlib_package();
+        // self.add_boots_package();
         self.add_program_package();
         self.add_dependency_packages();
     }
 
-    fn add_stdlib_package(&mut self) {
+    /*fn add_stdlib_package(&mut self) {
         let stdlib_name = "std";
         let stdlib_iname = self.sa.interner.intern(stdlib_name);
         let (package_id, module_id) = add_package(self.sa, PackageName::Stdlib, Some(stdlib_iname));
@@ -94,9 +99,9 @@ impl<'a> ProgramParser<'a> {
             let module_path = PathBuf::from(file_path.parent().expect("parent missing"));
             self.add_bundled_file(package_id, module_id, file_path, module_path);
         }
-    }
+    }*/
 
-    fn add_bundled_file(
+    /*fn add_bundled_file(
         &mut self,
         package_id: PackageDefinitionId,
         module_id: ModuleDefinitionId,
@@ -112,9 +117,9 @@ impl<'a> ProgramParser<'a> {
             Some(module_path),
             FileLookup::Bundle,
         );
-    }
+    }*/
 
-    fn get_bundled_file(&self, path: &Path) -> &'static str {
+    /*fn get_bundled_file(&self, path: &Path) -> &'static str {
         for (name, content) in STDLIB {
             if *name == path.to_string_lossy() {
                 return *content;
@@ -125,7 +130,7 @@ impl<'a> ProgramParser<'a> {
             eprintln!("\t{}", bundled_file_path);
         }
         panic!("can't find file {} in bundle.", path.display())
-    }
+    }*/
 
     //fn add_boots_package(&mut self) {
     //    let boots_name: String = "boots".into();
@@ -146,19 +151,8 @@ impl<'a> ProgramParser<'a> {
         self.sa.set_program_package_id(package_id);
 
         if self.sa.args.arg_file.is_none() {
-            if let Some(ref content) = self.sa.args.test_file_as_string {
-                self.add_file_from_string(
-                    package_id,
-                    module_id,
-                    PathBuf::from("<<code>>"),
-                    content.to_string(),
-                    None,
-                    FileLookup::FileSystem,
-                );
-            } else {
-                self.sa
-                    .report_without_location(ErrorMessage::MissingFileArgument);
-            }
+            self.sa
+                .report_without_location(ErrorMessage::MissingFileArgument);
         } else {
             let arg_file = self.sa.args.arg_file.as_ref().expect("argument expected");
             let arg_file = arg_file.clone();
@@ -171,13 +165,15 @@ impl<'a> ProgramParser<'a> {
     fn add_dependency_packages(&mut self) {
         let packages = std::mem::replace(&mut self.packages, HashMap::new());
 
-        for (name, path) in packages {
+        for (name, paths) in packages {
             let iname = self.sa.interner.intern(&name);
             let package_name = PackageName::External(name.clone());
             let (package_id, module_id) = add_package(self.sa, package_name, Some(iname));
             self.sa.package_names.insert(name, package_id);
 
-            self.add_file_from_filesystem(package_id, module_id, path);
+            for path in paths {
+                self.add_file_from_filesystem(package_id, module_id, path);
+            }
         }
     }
 
@@ -187,42 +183,34 @@ impl<'a> ProgramParser<'a> {
         module_id: ModuleDefinitionId,
         file_id: SourceFileId,
         module_path: Option<PathBuf>,
-        file_lookup: FileLookup,
         ast: &ast::File,
     ) {
-        let module_table = {
-            let mut decl_discovery = TopLevelDeclaration {
-                sa: self.sa,
-                package_id,
-                module_id,
-                file_id,
-                external_modules: Vec::new(),
-                module_table: SymTable::new(),
-                module_symtables: &mut self.module_symtables,
-            };
+        let module_table = self
+            .module_symtables
+            .remove(&module_id)
+            .unwrap_or(SymTable::new());
 
-            decl_discovery.visit_file(ast);
-
-            let module_table = decl_discovery.module_table;
-
-            if !decl_discovery.external_modules.is_empty() {
-                for external_module_id in decl_discovery.external_modules {
-                    self.add_module_files(
-                        package_id,
-                        external_module_id,
-                        module_path.clone(),
-                        file_lookup,
-                    );
-                }
-            }
-
-            module_table
+        let mut decl_discovery = TopLevelDeclaration {
+            sa: self.sa,
+            package_id,
+            module_id,
+            file_id,
+            external_modules: Vec::new(),
+            module_table,
+            module_symtables: &mut self.module_symtables,
         };
 
-        assert!(self
-            .module_symtables
-            .insert(module_id, module_table)
-            .is_none());
+        decl_discovery.visit_file(ast);
+
+        let module_table = decl_discovery.module_table;
+
+        if !decl_discovery.external_modules.is_empty() {
+            for external_module_id in decl_discovery.external_modules {
+                self.add_module_files(package_id, external_module_id, module_path.clone());
+            }
+        }
+
+        self.module_symtables.insert(module_id, module_table);
     }
 
     fn add_module_files(
@@ -230,45 +218,27 @@ impl<'a> ProgramParser<'a> {
         package_id: PackageDefinitionId,
         module_id: ModuleDefinitionId,
         module_path: Option<PathBuf>,
-        file_lookup: FileLookup,
     ) {
         let module = self.sa.module(module_id);
         let node = module.ast.clone().unwrap();
         let file_id = module.file_id.expect("missing file_id");
 
         if let Some(ident) = &node.name {
-            match file_lookup {
-                FileLookup::FileSystem => {
-                    let module_path = module_path.expect("missing module_path");
+            let module_path = module_path.expect("missing module_path");
 
-                    let mut file_path = module_path.clone();
-                    file_path.push(format!("{}.dora", ident.name_as_string));
+            let mut file_path = module_path.clone();
+            file_path.push(format!("{}.ark", ident.name_as_string));
 
-                    let mut module_path = module_path;
-                    module_path.push(&ident.name_as_string);
+            let mut module_path = module_path;
+            module_path.push(&ident.name_as_string);
 
-                    self.add_file(
-                        package_id,
-                        module_id,
-                        file_path,
-                        Some(module_path),
-                        Some((file_id, node.span)),
-                        FileLookup::FileSystem,
-                    );
-                }
-
-                FileLookup::Bundle => {
-                    let module_path = module_path.expect("missing module_path");
-
-                    let mut file_path = module_path.clone();
-                    file_path.push(format!("{}.dora", ident.name_as_string));
-
-                    let mut module_path = module_path;
-                    module_path.push(&ident.name_as_string);
-
-                    self.add_bundled_file(package_id, module_id, file_path, module_path);
-                }
-            }
+            self.add_file(
+                package_id,
+                module_id,
+                file_path,
+                Some(module_path),
+                Some((file_id, node.span)),
+            );
         }
     }
 
@@ -279,20 +249,12 @@ impl<'a> ProgramParser<'a> {
         path: PathBuf,
         module_path: Option<PathBuf>,
         error_location: Option<(SourceFileId, Span)>,
-        file_lookup: FileLookup,
     ) {
         let result = file_as_string(&path);
 
         match result {
             Ok(content) => {
-                self.add_file_from_string(
-                    package_id,
-                    module_id,
-                    path,
-                    content,
-                    module_path,
-                    file_lookup,
-                );
+                self.add_file_from_string(package_id, module_id, path, content, module_path);
             }
 
             Err(_) => {
@@ -316,14 +278,7 @@ impl<'a> ProgramParser<'a> {
         if path.is_file() {
             let file_path = PathBuf::from(path);
             let module_path = PathBuf::from(file_path.parent().expect("parent missing"));
-            self.add_file(
-                package_id,
-                module_id,
-                file_path,
-                Some(module_path),
-                None,
-                FileLookup::FileSystem,
-            );
+            self.add_file(package_id, module_id, file_path, Some(module_path), None);
         } else {
             self.sa
                 .report_without_location(ErrorMessage::FileDoesNotExist(path));
@@ -337,22 +292,17 @@ impl<'a> ProgramParser<'a> {
         file_path: PathBuf,
         content: String,
         module_path: Option<PathBuf>,
-        file_lookup: FileLookup,
     ) {
         let file_id = add_source_file(self.sa, package_id, module_id, file_path, Arc::new(content));
-        self.files_to_parse
-            .push_back((file_id, file_lookup, module_path));
+        self.files_to_parse.push_back((file_id, module_path));
     }
 
     fn parse_file(
-        &mut self,
+        &self,
+        file: &SourceFile,
         file_id: SourceFileId,
-        file_lookup: FileLookup,
         module_path: Option<PathBuf>,
-    ) {
-        let file = self.sa.file(file_id);
-        let package_id = file.package_id;
-        let module_id = file.module_id;
+    ) -> Arc<ast::File> {
         let content = file.content.clone();
 
         let parser = Parser::from_shared_string(content);
@@ -369,14 +319,7 @@ impl<'a> ProgramParser<'a> {
 
         assert!(self.sa.file(file_id).ast.set(ast.clone()).is_ok());
 
-        self.scan_file(
-            package_id,
-            module_id,
-            file_id,
-            module_path,
-            file_lookup,
-            &ast,
-        );
+        ast
     }
 }
 
@@ -399,37 +342,19 @@ struct TopLevelDeclaration<'x> {
 
 impl<'x> visit::Visitor for TopLevelDeclaration<'x> {
     fn visit_fct(&mut self, node: &Arc<ast::FnItem>) {
-        //let modifiers = check_modifiers(
-        //    self.sa,
-        //    self.file_id,
-        //    &node.modifiers,
-        //    &[
-        //        Annotation::Internal,
-        //        Annotation::OptimizeImmediately,
-        //        Annotation::Test,
-        //        Annotation::Pub,
-        //    ],
-        //);
+        let fct = FnDefinition {
+            package_id: self.package_id,
+            module_id: self.module_id,
+            file_id: self.file_id,
+            ast: node.clone(),
+            name: ensure_name(self.sa, &node.name),
+            id: None,
+        };
 
-        let fct = FctDefinition::new(
-            self.package_id,
-            self.module_id,
-            self.file_id,
-            node,
-            // TODO: revisit
-            ParsedModifierList {
-                is_pub: false,
-                is_static: false,
-                is_test: false,
-                is_optimize_immediately: false,
-                is_internal: false,
-            },
-            ensure_name(self.sa, &node.name),
-            FctParent::None,
-        );
         let fct_id = self.sa.functions.alloc(fct);
         self.sa.functions[fct_id].id = Some(fct_id);
-        let sym = SymbolKind::Fct(fct_id);
+        let sym = SymbolKind::Fn(fct_id);
+
         if let Some((name, sym)) = self.insert_optional(&node.name, sym) {
             report_sym_shadow_span(self.sa, name, self.file_id, node.span, sym);
         }
@@ -443,134 +368,6 @@ fn ensure_name(sa: &Sema, ident: &Option<ast::Ident>) -> Name {
         sa.interner.intern("<missing name>")
     }
 }
-
-#[derive(Default)]
-pub struct ParsedModifierList {
-    pub is_pub: bool,
-    pub is_static: bool,
-    pub is_test: bool,
-    pub is_optimize_immediately: bool,
-    pub is_internal: bool,
-}
-
-impl ParsedModifierList {
-    pub(crate) fn visibility(&self) -> Visibility {
-        if self.is_pub {
-            Visibility::Public
-        } else {
-            Visibility::Module
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-enum Annotation {
-    Internal,
-    Pub,
-    Static,
-    Test,
-    OptimizeImmediately,
-    Error,
-}
-
-impl Annotation {
-    fn is_error(&self) -> bool {
-        *self == Annotation::Error
-    }
-
-    fn name(&self) -> &'static str {
-        match *self {
-            Annotation::Internal => "internal",
-            Annotation::Pub => "pub",
-            Annotation::Static => "static",
-            Annotation::Test => "test",
-            Annotation::OptimizeImmediately => "optimizeImmediately",
-            Annotation::Error => "<error>",
-        }
-    }
-}
-
-/*fn check_modifiers(
-    sa: &Sema,
-    file_id: SourceFileId,
-    modifiers: &Option<ModifierList>,
-    allow_list: &[Annotation],
-) -> ParsedModifierList {
-    let mut parsed_modifiers = ParsedModifierList::default();
-
-    if let Some(modifiers) = modifiers {
-        let mut set: HashSet<Annotation> = HashSet::new();
-
-        for modifier in modifiers.iter() {
-            let value = check_modifier(sa, file_id, modifier, &mut parsed_modifiers);
-
-            if value.is_error() {
-                continue;
-            }
-
-            if !set.insert(value) {
-                sa.report(file_id, modifier.span, ErrorMessage::RedundantAnnotation);
-            }
-
-            if !allow_list.contains(&value) {
-                sa.report(
-                    file_id,
-                    modifier.span,
-                    ErrorMessage::MisplacedAnnotation(value.name().into()),
-                );
-            }
-        }
-    }
-
-    parsed_modifiers
-}
-
-fn check_modifier(
-    sa: &Sema,
-    file_id: SourceFileId,
-    modifier: &ast::Modifier,
-    parsed_modifiers: &mut ParsedModifierList,
-) -> Annotation {
-    if modifier.pub_token().is_some() {
-        parsed_modifiers.is_pub = true;
-        Annotation::Pub
-    } else if modifier.static_token().is_some() {
-        parsed_modifiers.is_static = true;
-        Annotation::Static
-    } else {
-        assert!(modifier.at_token().is_some());
-
-        if let Some(ident) = modifier.ident_token() {
-            match ident.value() {
-                "Test" => {
-                    parsed_modifiers.is_test = true;
-                    Annotation::Test
-                }
-
-                "optimizeImmediately" => {
-                    parsed_modifiers.is_optimize_immediately = true;
-                    Annotation::OptimizeImmediately
-                }
-
-                "internal" => {
-                    parsed_modifiers.is_internal = true;
-                    Annotation::Internal
-                }
-
-                _ => {
-                    sa.report(
-                        file_id,
-                        modifier.span,
-                        ErrorMessage::UnknownAnnotation(ident.value().into()),
-                    );
-                    Annotation::Error
-                }
-            }
-        } else {
-            Annotation::Error
-        }
-    }
-}*/
 
 impl<'x> TopLevelDeclaration<'x> {
     fn insert(&mut self, name: Name, sym: SymbolKind) -> Option<Symbol> {

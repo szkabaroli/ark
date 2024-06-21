@@ -2,13 +2,17 @@ use std::sync::Arc;
 
 use parser::ast;
 
-use crate::{error::msg::ErrorMessage, sema::{CallType, FctDefinitionId}, SourceType, SourceTypeArray, SymbolKind};
+use crate::{
+    error::msg::ErrorMessage,
+    sema::{CallType, FctDefinitionId},
+    SourceType, SourceTypeArray, SymbolKind,
+};
 
 use super::{expr::check_expr, function::TypeCheck, lookup::MethodLookup};
 
 pub(super) fn check_expr_call(
     ck: &mut TypeCheck,
-    e: &ast::ExprCallType,
+    e: &ast::Call,
     expected_ty: SourceType,
 ) -> SourceType {
     let (callee, type_params) = (&e.callee, SourceTypeArray::empty());
@@ -66,9 +70,9 @@ pub(super) fn check_expr_call(
 
 fn check_expr_call_sym(
     ck: &mut TypeCheck,
-    e: &ast::ExprCallType,
+    e: &ast::Call,
     expected_ty: SourceType,
-    callee: &ast::ExprData,
+    callee: &ast::ExprKind,
     sym: Option<SymbolKind>,
     type_params: SourceTypeArray,
     arg_types: &[SourceType],
@@ -95,10 +99,9 @@ fn check_expr_call_sym(
         //    variant_idx,
         //    &arg_types,
         //),
-
         _ => {
             todo!()
-            //if !type_params.is_empty() {   
+            //if !type_params.is_empty() {
             //    let msg = ErrorMessage::NoTypeParamsExpected;
             //    ck.sa.report(ck.file_id, e.callee.span(), msg);
             //}
@@ -109,10 +112,9 @@ fn check_expr_call_sym(
     }
 }
 
-
 fn check_expr_call_fct(
     ck: &mut TypeCheck,
-    e: &ast::ExprCallType,
+    e: &ast::Call,
     fct_id: FctDefinitionId,
     type_params: SourceTypeArray,
     arg_types: &[SourceType],
@@ -123,7 +125,7 @@ fn check_expr_call_fct(
     //    ck.sa.report(ck.file_id, e.span, msg);
     //}
 
-    let lookup = MethodLookup::new(ck.sa, ck.file_id/* , ck.type_param_defs*/)
+    let lookup = MethodLookup::new(ck.sa, ck.file_id /* , ck.type_param_defs*/)
         .span(e.span)
         .callee(fct_id)
         .args(&arg_types)
