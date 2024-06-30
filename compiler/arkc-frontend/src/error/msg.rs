@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
-use crate::sema::{Sema, SourceFileId};
+use parser::SourceFileId;
+use crate::sema::Sema;
+
 use parser::{compute_line_column, Span};
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -640,31 +642,25 @@ impl ErrorMessage {
 
 #[derive(Clone, Debug)]
 pub struct ErrorDescriptor {
-    pub file_id: Option<SourceFileId>,
     pub span: Option<Span>,
     pub msg: ErrorMessage,
 }
 
 impl ErrorDescriptor {
-    pub fn new(file: SourceFileId, span: Span, msg: ErrorMessage) -> ErrorDescriptor {
+    pub fn new(span: Span, msg: ErrorMessage) -> ErrorDescriptor {
         ErrorDescriptor {
-            file_id: Some(file),
             span: Some(span),
             msg,
         }
     }
 
     pub fn new_without_location(msg: ErrorMessage) -> ErrorDescriptor {
-        ErrorDescriptor {
-            file_id: None,
-            span: None,
-            msg,
-        }
+        ErrorDescriptor { span: None, msg }
     }
 
     pub fn line_column(&self, sa: &Sema) -> Option<(u32, u32)> {
-        if let Some(file_id) = self.file_id {
-            let file = sa.file(file_id);
+        if let Some(span) = self.span {
+            let file = sa.compilation.file(span.file_id);
             let span = self.span.expect("missing location");
             Some(compute_line_column(&file.line_starts, span.start()))
         } else {
@@ -673,8 +669,8 @@ impl ErrorDescriptor {
     }
 
     pub fn message(&self, sa: &Sema) -> String {
-        if let Some(file) = self.file_id {
-            let file = sa.file(file);
+        if let Some(span) = self.span {
+            let file = sa.compilation.file(span.file_id);
             let (line, column) = self.line_column(sa).expect("missing location");
 
             format!(

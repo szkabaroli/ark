@@ -64,6 +64,9 @@ pub const EXPRESSION_FIRST: TokenSet = TokenSet::new(&[
 
 pub const PARAM_LIST_RS: TokenSet = TokenSet::new(&[FN_KW, OR, L_BRACE]);
 
+pub const IMPORT_PATH_ATOM_FIRST: TokenSet = TokenSet::new(&[PACKAGE_KW, IDENTIFIER]);
+pub const MODIFIER_FIRST: TokenSet = TokenSet::new(&[PUB_KW, STATIC_KW]);
+
 pub const ELEM_FIRST: TokenSet = TokenSet::new(&[
     FN_KW,
     NODE_KW,
@@ -71,13 +74,16 @@ pub const ELEM_FIRST: TokenSet = TokenSet::new(&[
     //STRUCT_KW,
     //TRAIT_KW,
     //IMPL_KW,
-    //LET_KW,
+    LET_KW,
     //CONST_KW,
     //ENUM_KW,
     //MOD_KW,
     //USE_KW,
     //EXTERN_KW,
 ]);
+
+pub const FIELD_FIRST: TokenSet = TokenSet::new(&[IDENTIFIER, COLON]).union(MODIFIER_FIRST);
+pub const FIELD_VALUE_FIRST: TokenSet = TokenSet::new(&[IDENTIFIER, COLON]);
 
 pub const EMPTY: TokenSet = TokenSet::new(&[]);
 
@@ -99,12 +105,12 @@ pub enum TokenKind {
     // "big" shapes
     //CLASS_KW,
     //ENUM_KW,
-    //STRUCT_KW,
+    STRUCT_KW,
     //TRAIT_KW,
     //IMPL_KW,
-    //MOD_KW,
-    //USE_KW,
-    //PACKAGE_KW,
+    MOD_KW,
+    IMPORT_KW,
+    PACKAGE_KW,
     //EXTERN_KW,
 
     // "small" shapes
@@ -127,8 +133,8 @@ pub enum TokenKind {
     //MATCH_KW,
 
     // qualifiers
-    SELF_KW,
-    SUPER_KW,
+    //SELF_KW,
+    //SUPER_KW,
     PUB_KW,
     STATIC_KW,
 
@@ -210,14 +216,15 @@ pub enum TokenKind {
     //ALIAS,
     FN,
     FLOW,
-    //STRUCT,
-    //STRUCT_FIELD,
+    STRUCT,
+    STRUCT_FIELD,
+    FIELD_VALUE,
     //CLASS,
     //CLASS_FIELD,
-    //USE,
+    IMPORT,
     //USE_GROUP,
-    //USE_PATH,
-    //USE_COMPONENT,
+    IMPORT_PATH,
+    IMPORT_COMPONENT,
     //USE_RENAME,
     //EXTERN,
     //ENUM,

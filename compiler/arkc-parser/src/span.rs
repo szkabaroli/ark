@@ -1,19 +1,27 @@
 use std::fmt::{Display, Error, Formatter};
 use std::result::Result;
 
+use crate::source_file::SourceFileId;
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Span {
+    pub file_id: SourceFileId,
     start: u32,
     len: u32,
 }
 
 impl Span {
-    pub fn new(start: u32, len: u32) -> Span {
-        Span { start, len }
+    pub fn new(file_id: SourceFileId, start: u32, len: u32) -> Span {
+        Span {
+            file_id,
+            start,
+            len,
+        }
     }
 
-    pub fn at(start: u32) -> Span {
+    pub fn at(file_id: SourceFileId, start: u32) -> Span {
         Span {
+            file_id,
             start: start,
             len: 0,
         }

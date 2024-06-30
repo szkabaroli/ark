@@ -1,0 +1,12 @@
+[package]
+authors = []
+edition = "2021"
+name = "arkc-infer"
+version = "0.0.2"
+
+[dependencies]
+arkc-hir = {path = "../arkc-hir"}
+
+[profile.release]
+lto = true
+panic = 'abort'

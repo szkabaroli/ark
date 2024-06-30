@@ -1,67 +1,29 @@
-use arkc_frontend_alt::{check_program, hir::SourceFileId, sema::fn_by_name, Sema, SemaArgs};
+use std::path::PathBuf;
 
-use clap::{Parser, Subcommand, ValueEnum, ValueHint};
+use arkc_frontend::{Sema, SemaArgs};
 
-pub fn get_styles() -> clap::builder::Styles {
-    clap::builder::Styles::styled()
-        .usage(
-            anstyle::Style::new()
-                .bold()
-                .underline()
-                .fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Yellow))),
-        )
-        .header(
-            anstyle::Style::new()
-                .bold()
-                .underline()
-                .fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Yellow))),
-        )
-        .literal(
-            anstyle::Style::new().fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Green))),
-        )
-        .invalid(
-            anstyle::Style::new()
-                .bold()
-                .fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Red))),
-        )
-        .error(
-            anstyle::Style::new()
-                .bold()
-                .fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Red))),
-        )
-        .valid(
-            anstyle::Style::new()
-                .bold()
-                .underline()
-                .fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Green))),
-        )
-        .placeholder(
-            anstyle::Style::new().fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::White))),
-        )
-}
+use clap::{Parser, ValueEnum};
 
 #[derive(Parser)]
-#[command(author, version, about, long_about = None)]
-struct Args {
-    #[command(subcommand)]
-    cmd: Commands,
-}
+#[command(author, about, long_about = None)]
+struct CompilerArgs {
+    /// Name of the module to build
+    #[arg(long, short)]
+    files: Vec<PathBuf>,
 
-#[derive(Debug, PartialEq, Eq, Copy, Clone, ValueEnum)]
-pub enum Backend {
-    Cranelift,
-    Llvm,
-}
+    /// Name of the module to build
+    #[arg(long)]
+    module_name: Option<String>,
 
-fn validate_opt_argument(arg: &str) -> Result<char, &'static str> {
-    match arg {
-        "0" | "1" | "2" | "3" | "s" | "z" => Ok(arg.chars().next().unwrap()),
-        _ => Err("Argument to -O must be one of: 0, 1, 2, 3, s, or z"),
-    }
-}
+    /// Specify the package path to operate on (default current directory). This changes
+    /// the working directory before any other operation
+    #[arg(long)]
+    package_path: Option<PathBuf>,
 
-#[derive(Parser, Debug, Clone)]
-struct BuildArgs {
+    /// Specify a custom scratch directory path (default .build)
+    #[arg(long, default_value = ".build")]
+    scratch_path: Option<PathBuf>,
+
     /// Emits AST to stdout.
     #[arg(long)]
     emit_ast: Option<String>,
@@ -69,8 +31,8 @@ struct BuildArgs {
     #[arg(long)]
     emit_ir: bool,
 
-    /// Specify the backend to use ('llvm' or 'cranelift'). Note that cranelift is only for debug builds.
-    /// Ark will use cranelift by default for debug builds and llvm by default for optimized builds,
+    /// Specify the backend to use ('llvm' or 'bytecode'). Note that cranelift is only for debug builds.
+    /// Ark will use llvm by default for production builds and bc by default for vm targets,
     /// unless overridden by this flag
     #[arg(long)]
     pub backend: Option<Backend>,
@@ -81,11 +43,18 @@ struct BuildArgs {
     pub opt_level: char,
 }
 
-#[derive(Subcommand, Debug, Clone)]
-#[command(styles=get_styles())]
-enum Commands {
-    Run,
-    Build(BuildArgs),
+#[derive(Debug, PartialEq, Eq, Copy, Clone, ValueEnum)]
+pub enum Backend {
+    // Cranelift,
+    Bytecode,
+    Llvm,
+}
+
+fn validate_opt_argument(arg: &str) -> Result<char, &'static str> {
+    match arg {
+        "0" | "1" | "2" | "3" | "s" | "z" => Ok(arg.chars().next().unwrap()),
+        _ => Err("Argument to -O must be one of: 0, 1, 2, 3, s, or z"),
+    }
 }
 
 /// Convenience macro for unwrapping a Result or printing an error message and returning () on Err.
@@ -99,7 +68,7 @@ macro_rules! expect {( $result:expr , $fmt_string:expr $( , $($msg:tt)* )? ) => 
     }
 });}
 
-fn compile(args: BuildArgs) {
+fn compile(args: CompilerArgs) {
     // Setup the cache and read from the first file
     // let filename = Path::new(&args.file);
     // let file = File::open(filename);
@@ -110,31 +79,27 @@ fn compile(args: BuildArgs) {
     // let parent = filename.parent().unwrap();
 
     let sema_args = SemaArgs {
-        packages: vec![(
-            "test".to_string(),
-            vec![
-                "./examples/test.ark".parse().unwrap(),
-                "./examples/test2.ark".parse().unwrap(),
-            ],
-        )],
-        arg_file: Some("./main.ark".to_owned()),
+        module_name: args.module_name,
+        files: Some(args.files),
     };
 
     let mut sa = Sema::new(sema_args);
-    let success = arkc_frontend_alt::check_program(&mut sa);
+    let success = arkc_frontend::check_program(&mut sa);
     assert_eq!(success, !sa.diag.borrow().has_errors());
 
     if !success {
-        println!("errors: {:?}", sa.diag.borrow().errors())
+        println!("errors: {:?}", sa.diag.borrow().errors());
+        std::process::exit(1);
     }
 
-    let main_fn = fn_by_name(&sa, "main");
-    println!("main {:?}", main_fn)
+    // let main_fn = fn_by_name(&sa, "main");
+    // println!("main {:?}", main_fn);
 
-    /*if let Some(ref filter) = args.emit_ast {
+    if let Some(ref filter) = args.emit_ast {
         arkc_frontend::emit_ast(&sa, filter);
     }
 
+    /*
     let (id, func) = sa
         .functions
         .iter()
@@ -143,28 +108,39 @@ fn compile(args: BuildArgs) {
 
     let source = sa.file(func.file_id);
 
+    */
+
     // Phase 6: Codegen
     let default_backend = Backend::Llvm;
     let backend = args.backend.unwrap_or(default_backend);
 
     match backend {
-        Backend::Cranelift => unimplemented!(),
+        Backend::Bytecode => {
+            if cfg!(feature = "bc") {
+                #[cfg(feature = "bc")]
+                {
+                    let hir = sa.compilation.hir.borrow();
+                    arkc_codegen_bc::codegen(&hir[0]);
+                }
+            } else {
+                eprintln!("The bc backend is required running in interpreted mode. Recompile ark with --features 'bc'.");
+            }
+        }
         Backend::Llvm => {
             if cfg!(feature = "llvm") {
                 #[cfg(feature = "llvm")]
-                arkc_codegen_llvm::run("test".to_string(), source.ast.get().cloned().unwrap());
+                {
+                    let hir = sa.compilation.hir.borrow();
+                    arkc_codegen_llvm::codegen(&hir[0]);
+                }
             } else {
                 eprintln!("The llvm backend is required for non-debug builds. Recompile ark with --features 'llvm' to enable optimized builds.");
             }
         }
-    }*/
+    }
 }
 
 fn main() {
-    let args = Args::parse();
-
-    match args.cmd {
-        Commands::Run => todo!(),
-        Commands::Build(args) => compile(args),
-    }
+    let args = CompilerArgs::parse();
+    compile(args)
 }

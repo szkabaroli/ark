@@ -1,79 +1,131 @@
-mod call;
-mod control;
 mod expr;
 mod function;
-mod lookup;
 mod stmt;
+mod literals;
 
-use call::check_expr_call;
-use control::check_expr_return;
-use expr::check_expr;
-use function::{add_local, check_lit_float, check_lit_int, TypeCheck, VarManager};
-use stmt::check_stmt;
+use crate::Sema;
+use crate::{compilation::ModuleId, sym::ModuleSymTable};
+use arkc_hir::hir::NodeMap;
+use arkc_hir::{hir, ty};
+use function::VarManager;
+use std::collections::BTreeMap;
 
-use crate::{
-    sema::{AnalysisData, FctDefinition, FctParent, Sema},
-    sym::ModuleSymTable,
-};
+pub use function::{TypeCheck, Var, NestedVarId};
 
-pub fn check(sa: &mut Sema) {
-    //let mut lazy_context_class_creation = Vec::new();
-    //let mut lazy_lambda_creation = Vec::new();
-
-    for (_id, fct) in sa.functions.iter() {
-        if fct.has_body() {
-            check_function(
-                sa,
-                fct,
-                //&mut lazy_context_class_creation,
-                //&mut lazy_lambda_creation,
-            );
-        }
+pub fn returns_value(statement: &hir::Statement) -> Result<(), ()> {
+    match *statement.kind {
+        hir::StatementKind::Let(ref stmt) => Err(()),
+        hir::StatementKind::Expr(ref expr) => expr_returns_value(&expr),
     }
 }
 
-fn check_function(
+/*pub(super) fn add_local(
     sa: &Sema,
-    fct: &FctDefinition,
-    // lazy_context_class_creation: &mut Vec<LazyContextClassCreationData>,
-    // lazy_lambda_creation: &mut Vec<LazyLambdaCreationData>,
+    symtable: &mut ModuleSymTable,
+    vars: &VarManager,
+    id: NestedVarId,
+    span: Span,
 ) {
-    let mut analysis = AnalysisData::new();
-    let mut symtable = ModuleSymTable::new(sa, fct.module_id);
-    let mut vars = VarManager::new();
-    let mut context_classes = Vec::new();
+    let name = vars.get_var(id).name;
+    let existing_symbol = symtable.insert(name, SymbolKind::Var(id));
 
-    let self_ty = match fct.parent {
-        FctParent::None => None,
-        //FctParent::Extension(id) => Some(sa.extension(id).ty().clone()),
-        //FctParent::Impl(id) => Some(sa.impl_(id).extended_ty()),
-        //FctParent::Trait(..) => Some(SourceType::This),
-        FctParent::Function => unreachable!(),
-    };
+    if let Some(existing_symbol) = existing_symbol {
+        if !existing_symbol.kind().is_var() {
+            report_sym_shadow_span(sa, name, span, existing_symbol)
+        }
+    }
+}*/
 
-    let mut typeck = TypeCheck {
-        sa,
-        //type_param_defs: fct.type_params(),
-        package_id: fct.package_id,
-        module_id: fct.module_id,
-        file_id: fct.file_id,
-        analysis: &mut analysis,
-        symtable: &mut symtable,
-        param_types: fct.params_with_self().to_owned(),
-        return_type: Some(fct.return_type()),
-        in_loop: false,
-        has_hidden_self_argument: fct.has_hidden_self_argument(),
-        is_self_available: fct.has_hidden_self_argument(),
-        self_ty,
-        is_lambda: false,
-        vars: &mut vars,
-        //lazy_context_class_creation,
-        //lazy_lambda_creation,
-        context_classes: &mut context_classes,
-        start_context_id: 0,
-        needs_context_slot_in_lambda_object: false,
-    };
+pub fn expr_returns_value(expr: &hir::Expr) -> Result<(), ()> {
+    match *expr.kind {
+        hir::ExprKind::Block(ref block) => block_returns_value(block),
+        //hir::ExprKind::If(ref expr) => expr_if_returns_value(expr),
+        //hir::ExprKind::For(ref expr) => Err(expr.span),
+        //hir::ExprKind::While(ref expr) => Err(expr.span),
+        //hir::ExprKind::Break(ref stmt) => Err(stmt.span),
+        //hir::ExprKind::Continue(ref stmt) => Err(stmt.span),
+        hir::ExprKind::Return(..) => Ok(()),
+        _ => Err(()),
+    }
+}
 
-    typeck.check_fct(&fct.ast);
-    assert!(fct.analysis.set(analysis).is_ok());
+pub fn block_returns_value(blk: &hir::Block) -> Result<(), ()> {
+    for stmt in &blk.stmts {
+        match returns_value(stmt) {
+            Ok(_) => return Ok(()),
+            Err(err_pos) => todo!(),
+        }
+    }
+
+    if let Some(ref expr) = blk.expr {
+        expr_returns_value(expr)
+    } else {
+        Err(())
+    }
+}
+
+pub struct TypecheckingContext<'a> {
+    pub sa: &'a Sema,
+    module_id: ModuleId,
+}
+
+impl<'a> TypecheckingContext<'a> {
+    pub fn new(sa: &'a Sema, module_id: ModuleId) -> Self {
+        Self { sa, module_id }
+    }
+
+    pub fn check_file(&mut self) {
+        let (mut types, ints) = {
+            let root = &self.sa.compilation.hir.borrow()[0];
+            let mut types = BTreeMap::new();
+            let mut int_literals = NodeMap::new();
+
+            for item in root.elements.iter() {
+                match &item.kind {
+                    hir::ElemKind::Function(func) => {
+                        let func_ty = root.node_types.get(&func.hir_id).expect("to be defined");
+                        self.check_fn_declaration(&mut int_literals, &mut types, func_ty, &func)
+                    }
+                    _ => (),
+                }
+            }
+
+            (types, int_literals)
+        };
+
+        let root = &mut self.sa.compilation.hir.borrow_mut()[0];
+        root.node_types.append(&mut types);
+        root.int_literals.extend(ints);
+    }
+
+    fn check_fn_declaration(
+        &mut self,
+        int_literals: &mut NodeMap<i64>,
+        types: &mut BTreeMap<hir::HirId, ty::Type>,
+        func_ty: &ty::Type,
+        func: &hir::FnDeclaration,
+    ) {
+        let mut symtable = ModuleSymTable::new(self.sa, self.module_id);
+
+        let func_ty = match func_ty {
+            ty::Type::Function(ty) => ty,
+            _ => unreachable!(),
+        };
+
+        let hir = &self.sa.compilation.hir.borrow()[0];
+
+        let mut typeck = TypeCheck {
+            sa: self.sa,
+            ctx: self,
+            hir,
+            types,
+            int_literals,
+            symtable: &mut symtable,
+            param_types: vec![], // func.params_with_self().to_owned(),
+            return_type: func_ty.output.clone(),
+            vars: &mut VarManager::new(),
+        };
+
+        typeck.check_function(&func);
+    }
 }

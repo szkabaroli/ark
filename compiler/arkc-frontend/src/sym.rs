@@ -1,39 +1,40 @@
-use parking_lot::RwLock;
-
+use arkc_hir::hir::HirId;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::Arc;
 
 use self::SymbolKind::*;
 
+use crate::compilation::ModuleId;
 use crate::interner::Name;
-use crate::sema::{FctDefinitionId, ModuleDefinitionId, NestedVarId, Sema, Visibility};
+use crate::typecheck::NestedVarId;
+use crate::Sema;
 
 pub struct ModuleSymTable {
-    module_id: ModuleDefinitionId,
+    module_id: ModuleId,
     levels: Vec<SymTable>,
     outer: Rc<SymTable>,
-    dependencies: Arc<RwLock<SymTable>>,
-    prelude: Rc<SymTable>,
+    // dependencies: Arc<RwLock<SymTable>>,
+    // prelude: Rc<SymTable>,
 }
 
 impl ModuleSymTable {
-    pub fn new(sa: &Sema, module_id: ModuleDefinitionId) -> ModuleSymTable {
-        let module = sa.module(module_id);
+    pub fn new(sa: &Sema, module_id: ModuleId) -> ModuleSymTable {
+        let module = sa.compilation.module(module_id);
         let outer = module.table();
-        let dependencies = sa.packages[module.package_id()].table.clone();
-        let prelude = sa.module(sa.prelude_module_id()).table();
+        print!("outer {:?}", outer);
+        // let dependencies = sa.compilation.modules[module_id].table.clone();
+        // let prelude = sa.module(sa.prelude_module_id()).table();
 
         ModuleSymTable {
             module_id,
             levels: Vec::new(),
             outer,
-            dependencies,
-            prelude,
+            // dependencies,
+            // prelude,
         }
     }
 
-    pub fn module_id(&self) -> ModuleDefinitionId {
+    pub fn module_id(&self) -> ModuleId {
         self.module_id
     }
 
@@ -66,13 +67,13 @@ impl ModuleSymTable {
             return Some(sym.clone());
         }
 
-        if let Some(sym) = self.dependencies.read().get(name) {
-            return Some(sym.clone());
-        }
+        //if let Some(sym) = self.dependencies.read().get(name) {
+        //    return Some(sym.clone());
+        //}
 
-        if let Some(sym) = self.prelude.get(name) {
-            return Some(sym.clone());
-        }
+        //if let Some(sym) = self.prelude.get(name) {
+        //    return Some(sym.clone());
+        //}
 
         None
     }
@@ -82,7 +83,7 @@ impl ModuleSymTable {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SymTable {
     table: HashMap<Name, Symbol>,
 }
@@ -105,7 +106,7 @@ impl SymTable {
 
     pub fn insert(&mut self, name: Name, kind: SymbolKind) -> Option<Symbol> {
         let symbol = Symbol {
-            visibility: None,
+            //visibility: None,
             kind,
         };
         self.table.insert(name, symbol)
@@ -114,11 +115,11 @@ impl SymTable {
     pub fn insert_use(
         &mut self,
         name: Name,
-        visibility: Visibility,
+        //visibility: Visibility,
         kind: SymbolKind,
     ) -> Option<Symbol> {
         let symbol = Symbol {
-            visibility: Some(visibility),
+            //visibility: Some(visibility),
             kind,
         };
         self.table.insert(name, symbol)
@@ -133,14 +134,14 @@ impl SymTable {
 
 #[derive(Debug, Clone)]
 pub struct Symbol {
-    visibility: Option<Visibility>,
+    // visibility: Option<Visibility>,
     kind: SymbolKind,
 }
 
 impl Symbol {
-    pub fn visibility(&self) -> Option<&Visibility> {
-        self.visibility.as_ref()
-    }
+    //pub fn visibility(&self) -> Option<&Visibility> {
+    //    self.visibility.as_ref()
+    //}
 
     pub fn kind(&self) -> &SymbolKind {
         &self.kind
@@ -149,39 +150,32 @@ impl Symbol {
 
 #[derive(Debug, Clone)]
 pub enum SymbolKind {
-    //Class(ClassDefinitionId),
-    //Struct(StructDefinitionId),
-    //Trait(TraitDefinitionId),
-    //TypeParam(TypeParamId),
-    //Enum(EnumDefinitionId),
-    //Field(FieldId),
-    Fct(FctDefinitionId),
+    Module(ModuleId),
+    Struct(HirId),
+    FnDecl(HirId),
     Var(NestedVarId),
-    //Global(GlobalDefinitionId),
-    //Const(ConstDefinitionId),
-    Module(ModuleDefinitionId),
-    //EnumVariant(EnumDefinitionId, u32),
-    //TypeAlias(AliasDefinitionId),
+    //Field(HirId),
+    //Class(HirId),
+    //Trait(HirId),
+    //TypeParam(HirId),
+    //Enum(HirId),
+    //Global(NodeId),
+    //Const(NodeId),
+    //EnumVariant(NodeId, u32),
+    //TypeAlias(NodeId),
 }
 
 impl SymbolKind {
-    pub fn is_var(&self) -> bool {
+    pub fn to_fn(&self) -> Option<HirId> {
         match *self {
-            Var(_) => true,
-            _ => false,
+            FnDecl(id) => Some(id),
+            _ => None,
         }
     }
 
-    pub fn is_fct(&self) -> bool {
+    pub fn to_struct(&self) -> Option<HirId> {
         match *self {
-            Fct(_) => true,
-            _ => false,
-        }
-    }
-
-    pub fn to_fct(&self) -> Option<FctDefinitionId> {
-        match *self {
-            Fct(id) => Some(id),
+            Struct(id) => Some(id),
             _ => None,
         }
     }
@@ -193,10 +187,17 @@ impl SymbolKind {
         }
     }
 
-    pub fn to_module(&self) -> Option<ModuleDefinitionId> {
+    pub fn to_module(&self) -> Option<ModuleId> {
         match *self {
             Module(id) => Some(id),
             _ => None,
+        }
+    }
+
+    pub fn is_var(&self) -> bool {
+        match *self {
+            Var(_) => true,
+            _ => false,
         }
     }
 }

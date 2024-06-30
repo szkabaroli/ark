@@ -1,0 +1,13 @@
+[package]
+authors = []
+edition = "2021"
+name = "arkc-codegen-bc"
+version = "0.0.2"
+
+[dependencies]
+arkc-frontend={path = "../arkc-frontend"}
+parser={path = "../arkc-parser"}
+
+[profile.release]
+lto = true
+panic = 'abort'

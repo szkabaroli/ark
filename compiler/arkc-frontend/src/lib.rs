@@ -1,108 +1,107 @@
-use error::msg::ErrorMessage;
-use parser::{ast, Span};
-
-pub use interner::Name;
-pub use sema::{Sema, SourceFileId};
-pub use sym::{SymTable, Symbol, SymbolKind};
-pub use ty::{SourceType, SourceTypeArray};
-
-pub mod return_check;
+pub mod compilation;
 pub mod sema;
-pub mod specialize;
-pub mod sym;
-pub mod test;
-pub mod ty;
-pub mod typecheck;
-//pub mod hir;
-//pub mod hir_id;
 
 mod error;
-mod fctdef_check;
-mod import_check;
+mod fndefcheck;
 mod interner;
+mod known;
 mod program_parser;
 mod readty;
+mod resolve;
 mod stdlib_lookup;
+mod strudefcheck;
+mod sym;
+mod typecheck;
 
-pub const STDLIB: &[(&str, &str)] = &include!(concat!(env!("OUT_DIR"), "/dora_stdlib_bundle.rs"));
+use arkc_ast_lowering::lower_file;
+use arkc_hir::hir;
+use error::msg::ErrorMessage;
+use program_parser::ProgramParser;
+use resolve::SymbolResolver;
+use std::rc::Rc;
+use sym::{Symbol, SymbolKind};
+use typecheck::TypecheckingContext;
+
+pub use interner::Name;
+pub use readty::{check_type, replace_type};
+pub use sema::{Sema, SemaArgs};
 
 macro_rules! return_on_error {
-    ($vm: ident) => {{
-        if $vm.diag.borrow().has_errors() {
+    ($sa: ident) => {{
+        if $sa.diag.borrow().has_errors() {
             return false;
         }
     }};
 }
 
-pub fn check_program(sa: &mut Sema) -> bool {
-    // This phase loads and parses all files. Also creates top-level-elements.
-    let module_symtables = program_parser::parse(sa);
+pub const CONFIG: bincode::config::Configuration = bincode::config::standard();
 
-    // Discover all imported types.
-    import_check::check(sa, module_symtables);
+pub fn check_program(sa: &mut Sema) -> bool {
+    // This phase loads and parses all files.
+
+    let ast = {
+        let mut parser = ProgramParser::new(sa);
+        parser.parse_all()
+    };
+
     return_on_error!(sa);
 
-    // Fill prelude with important types and functions.
-    stdlib_lookup::setup_prelude(sa);
+    let mut hir: Vec<hir::File> = ast.iter().map(|file| lower_file(file)).collect();
+    sa.compilation.ast.set(ast).unwrap();
+
+    let module_id = sa.compilation.program_module_id();
+
+    {
+        let mut resolver = SymbolResolver::new(sa);
+        let module_symtables = resolver.scan_file(module_id, &hir[0]);
+
+        for (module_id, table) in module_symtables {
+            assert!(sa
+                .module(module_id)
+                .table
+                .set(Rc::new(table.clone()))
+                .is_ok());
+        }
+    }
+
+    {
+        *sa.compilation.hir.borrow_mut() = hir;
+    }
 
     // Define internal types.
-    //stdlib_lookup::lookup_known_fundamental_types(sa);
+    stdlib_lookup::lookup_known_fundamental_types(sa);
 
-    // Now all types are known and we can start parsing types/type bounds.
-    //typedefck::parse_type_params(sa);
-    // Find all trait implementations for types.
-    //impldefck::check_definition(sa);
-    // Check types/type bounds for type params.
-    //typedefck::check_type_bounds(sa);
-    //return_on_error!(sa);
-
-    // Checks class/struct/trait/enum definitions.
-    //aliasck::check(sa);
-    //clsdefck::check(sa);
-    //structdefck::check(sa);
-    //traitdefck::check(sa);
-    //enumck::check(sa);
-    //impldefck::check_type_aliases(sa);
-    //return_on_error!(sa);
-
-    //globaldefck::check(sa);
-    //constdefck::check(sa);
-    //extensiondefck::check(sa);
-    //return_on_error!(sa);
-
-    // Check type definitions of params and return types in functions.
-    fctdef_check::check(sa);
+    strudefcheck::check(sa);
+    fndefcheck::check(sa);
     return_on_error!(sa);
 
-    // Check impl methods against trait definition.
-    //impldefck::check_definition_against_trait(sa);
-    //return_on_error!(sa);
+    let mut typecheck = TypecheckingContext::new(sa, module_id);
+    typecheck.check_file();
 
-    // Define internal functions & methods.
-    //stdlib_lookup::resolve_internal_functions(sa);
-    //stdlib_lookup::lookup_known_methods(sa);
-    //stdlib_lookup::create_lambda_class(sa);
+    //let mut f = std::fs::File::create("./test.arkmodule").unwrap();
+    //let _ = encode_into_std_write(sa.compilation.hir.take(), &mut f, CONFIG);
 
-    // Check for internal functions, methods or types.
-    //internalck(sa);
-    //return_on_error!(sa);
-
-    // Check function body.
-    typecheck::check(sa);
-    return_on_error!(sa);
+    /*for (module_id, table) in discoverer.module_symtables {
+        assert!(sa
+            .compilation
+            .module(module_id)
+            .table
+            .set(Rc::new(table))
+            .is_ok());
+    }*/
 
     true
 }
 
-pub fn report_sym_shadow_span(sa: &Sema, name: Name, file: SourceFileId, span: Span, sym: Symbol) {
+pub fn report_sym_shadow_span(sa: &Sema, name: Name, sym: Symbol /*span: Span*/) {
     let name = sa.interner.str(name).to_string();
 
     let msg = match sym.kind() {
         //SymbolKind::Class(_) => ErrorMessage::ShadowClass(name),
-        //SymbolKind::Struct(_) => ErrorMessage::ShadowStruct(name),
+        SymbolKind::Struct(_) => ErrorMessage::ShadowStruct(name),
         //SymbolKind::Trait(_) => ErrorMessage::ShadowTrait(name),
         //SymbolKind::Enum(_) => ErrorMessage::ShadowEnum(name),
-        SymbolKind::Fct(_) => ErrorMessage::ShadowFunction(name),
+        SymbolKind::FnDecl(_) => ErrorMessage::ShadowFunction(name),
         //SymbolKind::Global(_) => ErrorMessage::ShadowGlobal(name),
         //SymbolKind::Const(_) => ErrorMessage::ShadowConst(name),
         //SymbolKind::Var(_) => ErrorMessage::ShadowParam(name),
@@ -111,21 +110,8 @@ pub fn report_sym_shadow_span(sa: &Sema, name: Name, file: SourceFileId, span: S
         _ => unreachable!(),
     };
 
-    sa.report(file, span, msg);
-}
-
-pub fn always_returns(s: &ast::StmtData) -> bool {
-    return_check::returns_value(s).is_ok()
-}
-
-pub fn expr_always_returns(e: &ast::ExprKind) -> bool {
-    todo!()
-    //returnck::expr_returns_value(e).is_ok()
-}
-
-pub fn expr_block_always_returns(e: &ast::ExprBlockType) -> bool {
-    todo!()
-    // returnck::expr_block_returns_value(e).is_ok()
+    panic!("{:?}", msg);
+    //sa.report(span, msg);
 }
 
 fn function_pattern_match(name: &str, pattern: &str) -> bool {
@@ -143,76 +129,11 @@ fn function_pattern_match(name: &str, pattern: &str) -> bool {
 }
 
 pub fn emit_ast(sa: &Sema, filter: &str) {
-    for (_id, function) in sa.functions.iter() {
-        let function_name = function.display_name(sa);
+    //for (_, function) in sa.compilation.functions.iter() {
+    //let function_name = function.display_name(sa);
 
-        if function_pattern_match(&function_name, filter) {
-            ast::dump::dump_function(&function.ast);
-        }
-    }
-}
-
-#[cfg(test)]
-pub mod tests {
-    use crate::error::msg::{ErrorDescriptor, ErrorMessage};
-    use crate::sema::Sema;
-    use crate::test;
-    use parser::{compute_line_column, compute_line_starts};
-
-    pub fn ok(code: &'static str) {
-        test::check(code, |vm| {
-            let diag = vm.diag.borrow();
-            let errors = diag.errors();
-
-            for e in errors {
-                println!("{}", e.message(vm));
-                println!("{:?}", e);
-                println!();
-            }
-
-            assert!(!diag.has_errors(), "program should not have errors.");
-        });
-    }
-
-    pub fn err(code: &'static str, loc: (u32, u32), msg: ErrorMessage) {
-        test::check(code, |vm| {
-            let diag = vm.diag.borrow();
-            let errors = diag.errors();
-
-            let error_loc = if errors.len() == 1 {
-                compute_pos(code, &errors[0])
-            } else {
-                None
-            };
-
-            if errors.len() != 1 || error_loc != Some(loc) || errors[0].msg != msg {
-                println!("expected:");
-                println!("\t{:?} at {}:{}", msg, loc.0, loc.1);
-                println!();
-                if errors.is_empty() {
-                    println!("but got no error.");
-                    println!();
-                } else {
-                    println!("but got:");
-                    for error in errors {
-                        println!("\t{:?} at {:?}", error.msg, compute_pos(code, error));
-                        println!();
-                    }
-                }
-            }
-
-            assert_eq!(1, errors.len(), "found {} errors instead", errors.len());
-            assert_eq!(Some(loc), error_loc);
-            assert_eq!(msg, errors[0].msg);
-        });
-    }
-
-    fn compute_pos(code: &str, error: &ErrorDescriptor) -> Option<(u32, u32)> {
-        if let Some(span) = error.span {
-            let line_starts = compute_line_starts(code);
-            Some(compute_line_column(&line_starts, span.start()))
-        } else {
-            None
-        }
-    }
+    //if function_pattern_match(&function_name, filter) {
+    //parser::ast::dump::dump_function(&function.ast);
+    //}
+    //}
 }

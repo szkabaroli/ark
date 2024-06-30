@@ -50,8 +50,10 @@ impl AstDumper {
     fn dump_elem(&mut self, el: &ElemData) {
         match *el {
             ElemData::Function(ref node) => self.dump_function(node),
+            ElemData::Import(ref node) => self.dump_import(node),
+            ElemData::Struct(ref node) => self.dump_struct(node),
+            ElemData::Flow(_) => dump!(self, "todo"),
             //ElemData::Class(ref node) => self.dump_class(node),
-            //ElemData::Struct(ref node) => self.dump_struct(node),
             //ElemData::Trait(ref node) => self.dump_trait(node),
             //ElemData::Impl(ref node) => self.dump_impl(node),
             //ElemData::Global(ref node) => self.dump_global(node),
@@ -59,14 +61,11 @@ impl AstDumper {
             //ElemData::Enum(ref node) => self.dump_enum(node),
             //ElemData::Alias(ref node) => self.dump_alias(node),
             //ElemData::Module(ref node) => self.dump_module(node),
-            //ElemData::Use(ref node) => self.dump_use(node),
             //ElemData::Extern(ref node) => self.dump_extern(node),
             //ElemData::TypeAlias(ref node) => self.dump_associated_type(node),
             ElemData::Error { id, span } => {
                 dump!(self, "error @ {} {}", span, id);
-            }
-            ElemData::Flow(_) => dump!(self, "todo"),
-            ElemData::Const(_) => dump!(self, "todo"),
+            } // ElemData::Const(_) => dump!(self, "todo"),
         }
     }
 
@@ -101,9 +100,9 @@ impl AstDumper {
         });
     }*/
 
-    /*fn dump_use(&mut self, node: &Use) {
-        dump!(self, "use @ {} {}", node.span, node.id);
-    }*/
+    fn dump_import(&mut self, node: &Import) {
+        dump!(self, "import @ {} {}", node.span, node.id);
+    }
 
     /*fn dump_alias(&mut self, alias: &Alias) {
         dump!(self, "alias @ {} {}", alias.span, alias.id);
@@ -168,7 +167,7 @@ impl AstDumper {
         });
     }*/
 
-    /*fn dump_struct(&mut self, struc: &Struct) {
+    fn dump_struct(&mut self, struc: &StructItem) {
         dump!(self, "struct @ {} {}", struc.span, struc.id);
         self.dump_ident(&struc.name);
 
@@ -177,13 +176,13 @@ impl AstDumper {
                 d.dump_struct_field(field);
             }
         });
-    }*/
+    }
 
-    /*fn dump_struct_field(&mut self, field: &StructField) {
+    fn dump_struct_field(&mut self, field: &StructField) {
         dump!(self, "field @ {} {}", field.span, field.id);
         self.dump_ident(&field.name);
-        self.indent(|d| d.dump_type(&field.data_type));
-    }*/
+        self.indent(|d| d.dump_type(&field.ty));
+    }
 
     /*fn dump_trait(&mut self, t: &Trait) {
         dump!(self, "trait @ {} {}", t.span, t.id);
@@ -230,10 +229,10 @@ impl AstDumper {
         self.indent(|d| {
             dump!(d, "params");
             d.indent(|d| {
-                if fct.sig.inputs.is_empty() {
+                if fct.signature.inputs.is_empty() {
                     dump!(d, "<no params>");
                 } else {
-                    for param in &fct.sig.inputs {
+                    for param in &fct.signature.inputs {
                         d.dump_param(param);
                     }
                 }
@@ -241,7 +240,7 @@ impl AstDumper {
 
             dump!(d, "returns");
 
-            if let Some(ref ty) = fct.sig.output {
+            if let Some(ref ty) = fct.signature.output {
                 d.indent(|d| d.dump_type(ty));
             } else {
                 d.indent(|d| dump!(d, "<no return type>"))
@@ -249,8 +248,8 @@ impl AstDumper {
 
             dump!(d, "executes");
 
-            if let Some(ref block) = fct.block {
-                d.indent(|d| d.dump_expr(block));
+            if let Some(ref body) = fct.body {
+                d.indent(|d| d.dump_expr(body));
             }
         });
     }
@@ -269,11 +268,11 @@ impl AstDumper {
     fn dump_stmt(&mut self, stmt: &StmtData) {
         match *stmt {
             StmtData::Expr(ref expr) => self.dump_stmt_expr(expr),
-            // StmtData::Let(ref stmt) => self.dump_stmt_let(stmt),
+            StmtData::Let(ref stmt) => self.dump_stmt_let(stmt),
         }
     }
 
-    /*fn dump_stmt_let(&mut self, stmt: &StmtLetType) {
+    fn dump_stmt_let(&mut self, stmt: &StmtLetType) {
         dump!(self, "let @ {} {}", stmt.span, stmt.id);
 
         self.indent(|d| {
@@ -296,12 +295,12 @@ impl AstDumper {
                 }
             });
         });
-    }*/
+    }
 
-    /*fn dump_stmt_let_pattern(&mut self, pattern: &LetPattern) {
+    fn dump_stmt_let_pattern(&mut self, pattern: &PatternKind) {
         match pattern {
-            LetPattern::Ident(ref ident) => dump!(self, "ident {:?}", ident.name),
-            LetPattern::Underscore(_) => dump!(self, "_"),
+            PatternKind::Ident(ref ident) => dump!(self, "ident {:?}", ident.name),
+            /*LetPattern::Underscore(_) => dump!(self, "_"),
             LetPattern::Tuple(ref tuple) => {
                 dump!(self, "tuple");
                 self.indent(|d| {
@@ -309,9 +308,9 @@ impl AstDumper {
                         d.dump_stmt_let_pattern(part);
                     }
                 });
-            }
+            }*/
         }
-    }*/
+    }
 
     /*fn dump_expr_for(&mut self, stmt: &ExprForType) {
         dump!(self, "for @ {} {}", stmt.span, stmt.id);
@@ -377,7 +376,7 @@ impl AstDumper {
             ExprKind::Un(ref un) => self.dump_expr_un(un),
             ExprKind::Bin(ref bin, ref lhs, ref rhs) => self.dump_expr_bin(bin, lhs, rhs),
             ExprKind::Dot(ref field) => self.dump_expr_dot(field),
-            ExprKind::Lit(ref lit) => self.dump_expr_lit(lit),
+            ExprKind::Literal(ref lit) => self.dump_expr_lit(lit),
             //ExprData::Template(ref tmpl) => self.dump_expr_template(tmpl),
             ExprKind::Ident(ref ident) => self.dump_expr_ident(ident),
             ExprKind::Call(ref call) => self.dump_expr_call(call),
@@ -396,6 +395,7 @@ impl AstDumper {
             //ExprData::While(ref expr) => self.dump_expr_while(expr),
             //ExprData::Break(ref expr) => self.dump_expr_break(expr),
             //ExprData::Continue(ref expr) => self.dump_expr_continue(expr),
+            ExprKind::Struct(ref expr) => self.dump_expr_struct(expr),
             ExprKind::Return(ref ret) => self.dump_expr_return(ret),
             ExprKind::Error { id, span } => {
                 dump!(self, "error @ {} {}", span, id);
@@ -469,11 +469,12 @@ impl AstDumper {
             LitKind::Int(value) => dump!(self, "kind int {}", value),
             LitKind::Float(value) => dump!(self, "kind float {}", value),
             LitKind::Bool(value) => dump!(self, "kind bool {}", value),
+            LitKind::Struct => dump!(self, "kind struct {{}}"),
             LitKind::Unit => dump!(self, "kind unit ()"),
         }
     }
 
-    fn dump_expr_lit(&mut self, lit: &Lit) {
+    fn dump_expr_lit(&mut self, lit: &Literal) {
         dump!(self, "lit @ {} {}", lit.span, lit.id);
         self.indent(|d| d.dump_lit_kind(&lit.kind));
     }
@@ -543,6 +544,10 @@ impl AstDumper {
                 d.dump_expr(arg);
             }
         });
+    }
+
+    fn dump_expr_struct(&mut self, expr: &ExprStruct) {
+        dump!(self, "stuct @ {} {}", expr.span, expr.id);
     }
 
     fn dump_expr_paren(&mut self, expr: &Paren) {

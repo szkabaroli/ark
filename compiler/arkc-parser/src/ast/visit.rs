@@ -13,6 +13,14 @@ pub trait Visitor: Sized {
         walk_flow(self, &f);
     }
 
+    fn visit_struct(&mut self, s: &Arc<StructItem>) {
+        walk_struct(self, s);
+    }
+
+    fn visit_struct_field(&mut self, f: &StructField) {
+        walk_struct_field(self, f);
+    }
+
     fn visit_param(&mut self, p: &Param) {
         walk_param(self, p);
     }
@@ -28,6 +36,10 @@ pub trait Visitor: Sized {
     fn visit_expr(&mut self, e: &ExprKind) {
         walk_expr(self, e);
     }
+
+    fn visit_import(&mut self, i: &Arc<Import>) {
+        walk_import(self, i);
+    }
 }
 
 pub fn walk_file<V: Visitor>(v: &mut V, f: &File) {
@@ -41,15 +53,15 @@ pub fn walk_elem<V: Visitor>(v: &mut V, e: &ElemData) {
         ElemData::Function(f) => v.visit_fct(f),
         ElemData::Flow(f) => v.visit_flow(f),
         //ElemData::Class(ref c) => v.visit_class(c),
-        //ElemData::Struct(ref s) => v.visit_struct(s),
+        ElemData::Struct(ref s) => v.visit_struct(s),
         //ElemData::Trait(ref t) => v.visit_trait(t),
         //ElemData::Impl(ref i) => v.visit_impl(i),
         //ElemData::Global(ref g) => v.visit_global(g),
-        ElemData::Const(ref c) => todo!(),
+        // ElemData::Const(ref c) => todo!(),
         //ElemData::Enum(ref e) => v.visit_enum(e),
         //ElemData::Alias(ref e) => v.visit_alias(e),
         //ElemData::Module(ref e) => v.visit_module(e),
-        //ElemData::Use(ref i) => v.visit_use(i),
+        ElemData::Import(ref i) => v.visit_import(i),
         //ElemData::Extern(ref stmt) => v.visit_extern(stmt),
         //ElemData::TypeAlias(ref node) => v.visit_type_alias(node),
         ElemData::Error { .. } => {}
@@ -57,17 +69,27 @@ pub fn walk_elem<V: Visitor>(v: &mut V, e: &ElemData) {
 }
 
 pub fn walk_fct<V: Visitor>(v: &mut V, f: &FnItem) {
-    for p in &f.sig.inputs {
+    for p in &f.signature.inputs {
         v.visit_param(p);
     }
 
-    if let Some(ref ty) = f.sig.output {
+    if let Some(ref ty) = f.signature.output {
         v.visit_type(ty);
     }
 
-    if let Some(ref block) = f.block {
-        v.visit_expr(block);
+    if let Some(ref body) = f.body {
+        v.visit_expr(body);
     }
+}
+
+pub fn walk_struct<V: Visitor>(v: &mut V, s: &StructItem) {
+    for f in &s.fields {
+        v.visit_struct_field(f);
+    }
+}
+
+pub fn walk_struct_field<V: Visitor>(v: &mut V, f: &StructField) {
+    v.visit_type(&f.ty);
 }
 
 pub fn walk_flow<V: Visitor>(v: &mut V, f: &Flow) {
@@ -80,10 +102,15 @@ pub fn walk_param<V: Visitor>(v: &mut V, p: &Param) {
     v.visit_type(&p.data_type);
 }
 
+pub fn walk_import<V: Visitor>(_v: &mut V, _use: &Arc<Import>) {
+    // nothing to do
+}
+
 pub fn walk_type<V: Visitor>(v: &mut V, t: &TypeData) {
     match *t {
         TypeData::This(_) => {}
         TypeData::Basic(_) => {}
+
         /*TypeData::Tuple(ref tuple) => {
             for ty in &tuple.subtypes {
                 v.visit_type(ty);
@@ -112,15 +139,15 @@ pub fn walk_type<V: Visitor>(v: &mut V, t: &TypeData) {
 
 pub fn walk_stmt<V: Visitor>(v: &mut V, s: &StmtData) {
     match *s {
-        //StmtData::Let(ref value) => {
-        //    if let Some(ref ty) = value.data_type {
-        //        v.visit_type(ty);
-        //    }
+        StmtData::Let(ref value) => {
+            if let Some(ref ty) = value.data_type {
+                v.visit_type(ty);
+            }
 
-        //    if let Some(ref e) = value.expr {
-        //        v.visit_expr(e);
-        //    }
-        //}
+            if let Some(ref e) = value.expr {
+                v.visit_expr(e);
+            }
+        }
         StmtData::Expr(ref value) => {
             v.visit_expr(&value.expr);
         }
@@ -230,7 +257,8 @@ pub fn walk_expr<V: Visitor>(v: &mut V, e: &ExprKind) {
         //ExprData::Continue(_) => {}
 
         //ExprData::This(_) => {}
-        ExprKind::Lit(_) => {}
+        ExprKind::Struct(_) => {}
+        ExprKind::Literal(_) => {}
         ExprKind::Ident(_) => {}
         ExprKind::Error { .. } => {}
     }

@@ -1,0 +1,14 @@
+[package]
+authors = []
+edition = "2021"
+name = "ark-vm"
+version = "0.0.2"
+
+[dependencies]
+ark-rt = {path = "../ark-rt"}
+bincode = { version = "2.0.0-rc.3"}
+lazy_static="1.0"
+
+[profile.release]
+lto = true
+panic = 'abort'

@@ -1,12 +1,10 @@
 [package]
-authors = []
 edition = "2021"
-name = "bytecode"
+name = "arkc-bytecode"
 version = "0.0.2"
 
 [dependencies]
-num_enum = "*"
-bincode = "2.0.0-rc.3"
+bincode = {version = "2.0.0-rc.3"}
 
 [profile.release]
 lto = true

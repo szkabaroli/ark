@@ -44,10 +44,12 @@ impl Deref for ArcStr {
     }
 }
 
+#[derive(Debug)]
 pub struct Interner {
     data: Mutex<Internal>,
 }
 
+#[derive(Debug)]
 struct Internal {
     map: HashMap<ArcStr, Name>,
     vec: Vec<ArcStr>,

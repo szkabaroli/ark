@@ -1,0 +1,13 @@
+[package]
+authors = []
+edition = "2021"
+name = "arkc-frontend-old"
+version = "0.0.2"
+
+[dependencies]
+id-arena = "*"
+parking_lot="*"
+parser = {path = "../arkc-parser"}
+
+[build-dependencies]
+walkdir = "2"

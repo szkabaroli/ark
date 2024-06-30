@@ -78,24 +78,63 @@ dependencies = [
 ]
 
 [[package]]
+name = "ark-rt"
+version = "0.0.2"
+
+[[package]]
+name = "ark-rt-staticlib"
+version = "0.0.2"
+dependencies = [
+ "ark-rt",
+]
+
+[[package]]
+name = "ark-vm"
+version = "0.0.2"
+dependencies = [
+ "ark-rt",
+ "bincode",
+ "lazy_static",
+]
+
+[[package]]
 name = "arkc"
 version = "0.0.2"
 dependencies = [
  "anstyle",
- "arkc-frontend-alt",
+ "arkc-codegen-bc",
+ "arkc-codegen-llvm",
+ "arkc-frontend",
  "bincode",
- "bytecode",
  "clap",
  "id-arena",
+]
+
+[[package]]
+name = "arkc-ast-lowering"
+version = "0.0.2"
+dependencies = [
+ "arkc-hir",
+ "bincode",
+ "parser",
+]
+
+[[package]]
+name = "arkc-bytecode"
+version = "0.0.2"
+dependencies = [
+ "bincode",
 ]
 
 [[package]]
 name = "arkc-codegen-bc"
 version = "0.0.2"
 dependencies = [
+ "ark-vm",
+ "arkc-bytecode",
  "arkc-frontend",
- "bytecode",
- "parser",
+ "arkc-hir",
+ "bincode",
 ]
 
 [[package]]
@@ -103,6 +142,7 @@ name = "arkc-codegen-llvm"
 version = "0.0.2"
 dependencies = [
  "arkc-frontend",
+ "arkc-hir",
  "inkwell",
  "parser",
 ]
@@ -111,20 +151,30 @@ dependencies = [
 name = "arkc-frontend"
 version = "0.0.2"
 dependencies = [
- "bytecode",
+ "arkc-ast-lowering",
+ "arkc-hir",
+ "arkc-infer",
+ "bincode",
  "id-arena",
  "parking_lot",
  "parser",
- "walkdir",
+ "serde",
 ]
 
 [[package]]
-name = "arkc-frontend-alt"
+name = "arkc-hir"
 version = "0.0.2"
 dependencies = [
- "id-arena",
- "parking_lot",
+ "bincode",
  "parser",
+ "serde",
+]
+
+[[package]]
+name = "arkc-infer"
+version = "0.0.2"
+dependencies = [
+ "arkc-hir",
 ]
 
 [[package]]
@@ -163,14 +213,6 @@ name = "bitflags"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf4b9d6a944f767f8e5e0db018570623c85f3d925ac718db4e06d0187adb21c1"
-
-[[package]]
-name = "bytecode"
-version = "0.0.2"
-dependencies = [
- "bincode",
- "num_enum",
-]
 
 [[package]]
 name = "cc"
@@ -316,23 +358,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "equivalent"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5443807d6dff69373d433ab9ef5378ad8df50ca6298caf15de6e52e24aaf54d5"
-
-[[package]]
-name = "flow-parser"
-version = "0.1.0"
-dependencies = [
- "multimap",
- "parser",
- "read-tree",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "form_urlencoded"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -340,12 +365,6 @@ checksum = "e13624c2627564efccf4934284bdd98cbaa14e79b0b5a141218e507b3a823456"
 dependencies = [
  "percent-encoding",
 ]
-
-[[package]]
-name = "hashbrown"
-version = "0.14.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5274423e17b7c9fc20b6e7e208532f9b19825d82dfd615708b70edd83df41f1"
 
 [[package]]
 name = "heck"
@@ -382,19 +401,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "indexmap"
-version = "2.2.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "168fb715dda47215e360912c096649d23d58bf392ac62f73919e831745e40f26"
-dependencies = [
- "equivalent",
- "hashbrown",
-]
-
-[[package]]
 name = "inkwell"
 version = "0.4.0"
-source = "git+https://github.com/TheDan64/inkwell?branch=master#5c9f7fcbb0a667f7391b94beb65f1a670ad13221"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b597a7b2cdf279aeef6d7149071e35e4bc87c2cf05a5b7f2d731300bffe587ea"
 dependencies = [
  "either",
  "inkwell_internals",
@@ -407,7 +417,8 @@ dependencies = [
 [[package]]
 name = "inkwell_internals"
 version = "0.9.0"
-source = "git+https://github.com/TheDan64/inkwell?branch=master#5c9f7fcbb0a667f7391b94beb65f1a670ad13221"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4fa4d8d74483041a882adaa9a29f633253a66dde85055f0495c121620ac484b2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -499,15 +510,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6d0d8b92cd8358e8d229c11df9358decae64d137c5be540952c5ca7b25aea768"
 
 [[package]]
-name = "multimap"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "defc4c55412d89136f966bbb339008b474350e5e6e78d2714439c386b3137a03"
-dependencies = [
- "serde",
-]
-
-[[package]]
 name = "num_cpus"
 version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -515,27 +517,6 @@ checksum = "4161fcb6d602d4d2081af7c3a45852d875a03dd337a6bfdd6e06407b61342a43"
 dependencies = [
  "hermit-abi",
  "libc",
-]
-
-[[package]]
-name = "num_enum"
-version = "0.7.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02339744ee7253741199f897151b38e72257d13802d4ee837285cc2990a90845"
-dependencies = [
- "num_enum_derive",
-]
-
-[[package]]
-name = "num_enum_derive"
-version = "0.7.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "681030a937600a36906c185595136d26abfebb4aa9c65701cefcaf8578bb982b"
-dependencies = [
- "proc-macro-crate",
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]
@@ -570,21 +551,15 @@ dependencies = [
 [[package]]
 name = "parser"
 version = "0.0.2"
+dependencies = [
+ "id-arena",
+]
 
 [[package]]
 name = "percent-encoding"
 version = "2.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3148f5046208a5d56bcfc03053e3ca6334e51da8dfb19b6cdc8b306fae3283e"
-
-[[package]]
-name = "proc-macro-crate"
-version = "3.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d37c51ca738a55da99dc0c4a34860fd675453b8b36209178c2249bb13651284"
-dependencies = [
- "toml_edit",
-]
 
 [[package]]
 name = "proc-macro2"
@@ -603,12 +578,6 @@ checksum = "0fa76aaf39101c457836aec0ce2316dbdc3ab723cdda1c6bd4e6ad4208acaca7"
 dependencies = [
  "proc-macro2",
 ]
-
-[[package]]
-name = "read-tree"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "afbde61c51c2b57d2c7028e874da1b029128854fb305bc46a914fd472b07f5d9"
 
 [[package]]
 name = "redox_syscall"
@@ -785,23 +754,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
-name = "toml_datetime"
-version = "0.6.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4badfd56924ae69bcc9039335b2e017639ce3f9b001c393c1b2d1ef846ce2cbf"
-
-[[package]]
-name = "toml_edit"
-version = "0.21.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a8534fd7f78b5405e860340ad6575217ce99f38d4d5c8f2442cb5ecb50090e1"
-dependencies = [
- "indexmap",
- "toml_datetime",
- "winnow",
-]
-
-[[package]]
 name = "unicode-bidi"
 version = "0.3.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -937,12 +889,3 @@ name = "windows_x86_64_msvc"
 version = "0.52.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bec47e5bfd1bff0eeaf6d8b485cc1074891a197ab4225d504cb7a1ab88b02bf0"
-
-[[package]]
-name = "winnow"
-version = "0.5.40"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f593a95398737aeed53e489c785df13f3618e41dbcd6718c6addbf1395aa6876"
-dependencies = [
- "memchr",
-]

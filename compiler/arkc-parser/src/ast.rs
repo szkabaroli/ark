@@ -5,12 +5,11 @@ use std::fmt;
 use std::slice::Iter;
 use std::sync::Arc;
 
-use crate::{green::GreenNode, span::Span};
-
-type P<T> = Arc<T>;
+use crate::{green::GreenNode, source_file::SourceFileId, span::Span};
 
 #[derive(Clone, Debug)]
 pub struct File {
+    pub source_id: SourceFileId,
     pub green: GreenNode,
     pub elements: Vec<Elem>,
 }
@@ -19,6 +18,11 @@ impl File {
     #[cfg(test)]
     pub fn fct0(&self) -> &FnItem {
         self.elements[0].to_function().unwrap()
+    }
+
+    #[cfg(test)]
+    pub fn struct0(&self) -> &StructItem {
+        self.elements[0].to_struct().unwrap()
     }
 
     #[cfg(test)]
@@ -45,6 +49,7 @@ pub type Ident = Arc<IdentData>;
 
 #[derive(Clone, Debug)]
 pub struct IdentData {
+    pub id: NodeId,
     pub span: Span,
     pub name_as_string: String,
 }
@@ -133,6 +138,13 @@ pub struct TypeBasicType {
     pub params: Vec<Type>,
 }
 
+#[derive(Clone, Debug)]
+pub struct TypePrimitiveType {
+    pub id: NodeId,
+    pub span: Span,
+    pub green: GreenNode,
+}
+
 impl TypeBasicType {
     #[cfg(test)]
     pub fn name(&self) -> String {
@@ -147,17 +159,66 @@ impl TypeBasicType {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct Import {
+    pub id: NodeId,
+    pub span: Span,
+    pub green: GreenNode,
+    pub modifiers: Option<ModifierList>,
+    pub path: Arc<ImportPath>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ImportPath {
+    pub id: NodeId,
+    pub span: Span,
+    pub green: GreenNode,
+    pub path: Vec<ImportAtom>,
+    pub target: ImportPathDescriptor,
+}
+
+#[derive(Clone, Debug)]
+pub struct ImportAtom {
+    pub green: GreenNode,
+    pub span: Span,
+    pub value: ImportPathComponentValue,
+}
+
+#[derive(Clone, Debug)]
+pub enum ImportPathComponentValue {
+    Package,
+    Name(Ident),
+    Error,
+}
+
+#[derive(Clone, Debug)]
+pub enum ImportPathDescriptor {
+    Default,
+    Error,
+}
+
 pub type Elem = Arc<ElemData>;
 
 #[derive(Clone, Debug)]
 pub enum ElemData {
     Function(Arc<FnItem>),
     Flow(Arc<Flow>),
-    Const(Arc<Const>),
+    Struct(Arc<StructItem>),
+    Import(Arc<Import>),
     Error { id: NodeId, span: Span },
 }
 
 impl ElemData {
+    pub fn span(&self) -> Span {
+        match self {
+            ElemData::Function(ref node) => node.span,
+            ElemData::Struct(ref node) => node.span,
+            ElemData::Flow(ref node) => node.span,
+            ElemData::Import(ref node) => node.span,
+            ElemData::Error { span, .. } => span.clone(),
+        }
+    }
+
     pub fn to_function(&self) -> Option<&FnItem> {
         match self {
             &ElemData::Function(ref fct) => Some(fct),
@@ -168,6 +229,13 @@ impl ElemData {
     pub fn to_flow(&self) -> Option<&Flow> {
         match self {
             &ElemData::Flow(ref flow) => Some(flow),
+            _ => None,
+        }
+    }
+
+    pub fn to_struct(&self) -> Option<&StructItem> {
+        match self {
+            &ElemData::Struct(ref v) => Some(v),
             _ => None,
         }
     }
@@ -293,7 +361,7 @@ pub struct Flow {
 
 /// Represents a function's signature.
 #[derive(Clone, Debug)]
-pub struct FnSig {
+pub struct FnSignature {
     pub inputs: Vec<Param>,
     pub output: Option<Type>,
     pub span: Span,
@@ -310,6 +378,24 @@ pub struct Block {
 }
 
 #[derive(Clone, Debug)]
+pub struct StructField {
+    pub id: NodeId,
+    pub span: Span,
+    pub name: Option<Ident>,
+    pub green: GreenNode,
+    pub ty: Type,
+}
+
+#[derive(Clone, Debug)]
+pub struct StructItem {
+    pub id: NodeId,
+    pub span: Span,
+    pub name: Option<Ident>,
+    pub green: GreenNode,
+    pub fields: Vec<StructField>,
+}
+
+#[derive(Clone, Debug)]
 pub struct FnItem {
     pub id: NodeId,
     pub declaration_span: Span,
@@ -318,14 +404,14 @@ pub struct FnItem {
     pub name: Option<Ident>,
     // pub kind: FunctionKind,
     // pub type_params: Option<TypeParams>,
-    pub sig: FnSig,
+    pub signature: FnSignature,
     //pub where_bounds: Option<WhereBounds>,
-    pub block: Option<Expr>,
+    pub body: Option<Expr>,
 }
 
 impl FnItem {
-    pub fn block(&self) -> &Expr {
-        self.block.as_ref().unwrap()
+    pub fn body(&self) -> &Expr {
+        self.body.as_ref().unwrap()
     }
 }
 
@@ -343,7 +429,7 @@ pub type Stmt = Arc<StmtData>;
 
 #[derive(Clone, Debug)]
 pub enum StmtData {
-    // Let(StmtLetType),
+    Let(StmtLetType),
     Expr(StmtExprType),
 }
 
@@ -352,10 +438,33 @@ impl StmtData {
         StmtData::Expr(StmtExprType { id, span, expr })
     }
 
+    pub fn create_let(
+        id: NodeId,
+        span: Span,
+        pattern: Box<PatternKind>,
+        data_type: Option<Type>,
+        expr: Option<Expr>,
+    ) -> StmtData {
+        StmtData::Let(StmtLetType {
+            id,
+            span,
+            pattern,
+            data_type,
+            expr
+        })
+    }
+
     pub fn span(&self) -> Span {
         match *self {
-            // StmtData::Let(ref stmt) => stmt.span,
+            StmtData::Let(ref stmt) => stmt.span,
             StmtData::Expr(ref stmt) => stmt.span,
+        }
+    }
+
+    pub fn to_let(&self) -> Option<&StmtLetType> {
+        match *self {
+            StmtData::Let(ref val) => Some(val),
+            _ => None,
         }
     }
 
@@ -383,7 +492,7 @@ pub enum FlowExprData {
     Path(ExprPathType),
     Dot(FlowExprDotType),
     Wire(FlowExprWireType),
-    Lit(Lit),
+    Lit(Literal),
     Ident(ExprIdentType),
     Error { id: NodeId, span: Span },
 }
@@ -465,16 +574,34 @@ pub struct FlowExprDotType {
 pub type Expr = Arc<ExprKind>;
 
 #[derive(Clone, Debug)]
+pub struct FieldValue {
+    pub id: NodeId,
+    pub span: Span,
+    pub green: GreenNode,
+    pub name: Option<Ident>,
+    pub value: Expr,
+}
+
+#[derive(Clone, Debug)]
+pub struct ExprStruct {
+    pub id: NodeId,
+    pub span: Span,
+    pub name: Expr,
+    pub field_values: Vec<FieldValue>
+}
+
+#[derive(Clone, Debug)]
 pub enum ExprKind {
     Un(ExprUnOpType),
     Bin(BinOp, Expr, Expr),
-    Lit(Lit),
+    Literal(Literal),
     //Template(ExprTemplateType),
     Ident(ExprIdentType),
     Call(Call),
     //TypeParam(ExprTypeParamType),
     Path(ExprPathType),
     Dot(Dot),
+    Struct(ExprStruct),
     //This(ExprSelfType),
     //Conv(ExprConvType),
     //Is(ExprIsType),
@@ -499,12 +626,13 @@ impl ExprKind {
             ExprKind::Bin(ref val, _, _) => val.id,
             //ExprData::LitStr(ref val) => val.id,
             //ExprData::Template(ref val) => val.id,
-            ExprKind::Lit(ref val) => val.id,
+            ExprKind::Literal(ref val) => val.id,
             ExprKind::Ident(ref val) => val.id,
             ExprKind::Call(ref val) => val.id,
             //ExprData::TypeParam(ref val) => val.id,
             ExprKind::Path(ref val) => val.id,
             ExprKind::Dot(ref val) => val.id,
+            ExprKind::Struct(ref val) => val.id,
             //ExprData::This(ref val) => val.id,
             //ExprData::Conv(ref val) => val.id,
             //ExprData::Is(ref val) => val.id,
@@ -529,12 +657,13 @@ impl ExprKind {
             ExprKind::Bin(ref val, _, _) => val.span,
             //ExprData::LitStr(ref val) => val.span,
             //ExprData::Template(ref val) => val.span,
-            ExprKind::Lit(ref val) => val.span,
+            ExprKind::Literal(ref val) => val.span,
             ExprKind::Ident(ref val) => val.span,
             ExprKind::Call(ref val) => val.span,
             //ExprData::TypeParam(ref val) => val.span,
             ExprKind::Path(ref val) => val.span,
             ExprKind::Dot(ref val) => val.span,
+            ExprKind::Struct(ref val) => val.span,
             //ExprData::This(ref val) => val.span,
             //ExprData::Conv(ref val) => val.span,
             //ExprData::Is(ref val) => val.span,
@@ -623,7 +752,7 @@ impl ExprKind {
     }
 
     pub fn create_lit_bool(id: NodeId, span: Span, green: GreenNode, value: bool) -> ExprKind {
-        ExprKind::Lit(Lit {
+        ExprKind::Literal(Literal {
             id,
             span,
             green,
@@ -632,7 +761,7 @@ impl ExprKind {
     }
 
     pub fn create_lit_int(id: NodeId, span: Span, green: GreenNode, value: String) -> ExprKind {
-        ExprKind::Lit(Lit {
+        ExprKind::Literal(Literal {
             id,
             span,
             green,
@@ -691,9 +820,9 @@ impl ExprKind {
         }
     }
 
-    pub fn to_lit(&self) -> Option<&Lit> {
+    pub fn to_lit(&self) -> Option<&Literal> {
         match *self {
-            ExprKind::Lit(ref val) => Some(val),
+            ExprKind::Literal(ref val) => Some(val),
             _ => None,
         }
     }
@@ -742,14 +871,14 @@ impl ExprKind {
 
     pub fn is_lit(&self) -> bool {
         match *self {
-            ExprKind::Lit(_) => true,
+            ExprKind::Literal(_) => true,
             _ => false,
         }
     }
 
     pub fn is_lit_int(&self) -> bool {
         match *self {
-            ExprKind::Lit(ref lit) => lit.is_int(),
+            ExprKind::Literal(ref lit) => lit.is_int(),
             _ => false,
         }
     }
@@ -788,6 +917,28 @@ impl ExprKind {
             _ => false,
         }
     }
+}
+
+#[derive(Clone, Debug)]
+pub struct LetIdentType {
+    pub id: NodeId,
+    pub span: Span,
+    pub mutable: bool,
+    pub name: Option<Ident>,
+}
+
+#[derive(Clone, Debug)]
+pub enum PatternKind {
+    Ident(LetIdentType),
+}
+
+#[derive(Clone, Debug)]
+pub struct StmtLetType {
+    pub id: NodeId,
+    pub span: Span,
+    pub pattern: Box<PatternKind>,
+    pub data_type: Option<Type>,
+    pub expr: Option<Expr>,
 }
 
 #[derive(Clone, Debug)]
@@ -843,6 +994,8 @@ pub struct Dot {
 /// which does *not* consider the suffix.
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub enum LitKind {
+    /// A struct literal `{ test: 10 }`.
+    Struct,
     /// A character literal `'a'`.
     Char(char),
     /// An integer literal `1`.
@@ -860,14 +1013,14 @@ pub enum LitKind {
 }
 
 #[derive(Clone, Debug)]
-pub struct Lit {
+pub struct Literal {
     pub id: NodeId,
     pub span: Span,
     pub green: GreenNode,
     pub kind: LitKind,
 }
 
-impl Lit {
+impl Literal {
     pub fn is_int(&self) -> bool {
         match self.kind {
             LitKind::Int(_) => true,

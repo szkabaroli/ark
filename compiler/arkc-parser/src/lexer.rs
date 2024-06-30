@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
-use crate::{ParseError, Span, TokenKind::*};
+use crate::source_file::SourceFileId;
 use crate::{error::ParseErrorWithLocation, token::TokenKind};
+use crate::{ParseError, Span, TokenKind::*};
 
 pub struct LexerResult {
     pub tokens: Vec<TokenKind>,
@@ -9,8 +10,8 @@ pub struct LexerResult {
     pub errors: Vec<ParseErrorWithLocation>,
 }
 
-pub fn lex(content: &str) -> LexerResult {
-    let mut lexer = Lexer::new(content);
+pub fn lex(source_id: SourceFileId, content: &str) -> LexerResult {
+    let mut lexer = Lexer::new(source_id, content);
     let mut tokens = Vec::new();
     let mut widths = Vec::new();
 
@@ -31,17 +32,20 @@ pub fn lex(content: &str) -> LexerResult {
 }
 
 struct Lexer<'a> {
+    source_id: SourceFileId,
     content: &'a str,
     offset: usize,
     keywords: HashMap<&'static str, TokenKind>,
     errors: Vec<ParseErrorWithLocation>,
     open_braces: Vec<usize>,
 }
+
 impl<'a> Lexer<'a> {
-    fn new(content: &str) -> Lexer {
+    fn new(source_id: SourceFileId, content: &str) -> Lexer {
         let keywords = keywords_in_map();
 
         Lexer {
+            source_id,
             offset: 0,
             content,
             keywords,
@@ -424,7 +428,7 @@ impl<'a> Lexer<'a> {
     }
 
     fn span_from(&self, start: u32) -> Span {
-        Span::new(start, self.offset() - start)
+        Span::new(self.source_id, start, self.offset() - start)
     }
 
     fn read_digits(&mut self, base: u32) {
@@ -534,11 +538,21 @@ fn keywords_in_map() -> HashMap<&'static str, TokenKind> {
     keywords.insert("true", TRUE);
     keywords.insert("false", FALSE);
 
+    // "big" shapes
+    // keywords.insert("class", CLASS_KW);
+    //keywords.insert("enum", ENUM_KW);
+    //keywords.insert("trait", TRAIT_KW);
+    //keywords.insert("impl", IMPL_KW);
+    keywords.insert("struct", STRUCT_KW);
+    keywords.insert("mod", MOD_KW);
+    keywords.insert("import", IMPORT_KW);
+    keywords.insert("package", PACKAGE_KW);
+
     // "small" shapes
     keywords.insert("fn", FN_KW);
     keywords.insert("flow", FLOW_KW);
     keywords.insert("node", NODE_KW);
-    //keywords.insert("let", LET_KW);
+    keywords.insert("let", LET_KW);
     //keywords.insert("mut", MUT_KW);
     //keywords.insert("const", CONST_KW);
 
@@ -556,8 +570,8 @@ fn keywords_in_map() -> HashMap<&'static str, TokenKind> {
     // qualifiers
     //keywords.insert("self", SELF_KW);
     //keywords.insert("super", SUPER_KW);
-    //keywords.insert("pub", PUB_KW);
-    //keywords.insert("static", STATIC_KW);
+    keywords.insert("pub", PUB_KW);
+    keywords.insert("static", STATIC_KW);
 
     // casting
     //keywords.insert("as", AS_KW);

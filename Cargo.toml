@@ -1,13 +1,20 @@
 [workspace]
 members = [
-  "flow-parser",
+  #"experiment/flow-parser",
   "ark-language-server",
+  #"experiment/arkc-frontend",
+  #"experiment/arkc-codegen-bc",
   "compiler/arkc",
+  "compiler/arkc-ast-lowering",
+  "compiler/arkc-infer",
+  "compiler/arkc-hir",
   "compiler/arkc-codegen-llvm",
   "compiler/arkc-codegen-bc",
   "compiler/arkc-frontend",
-  "compiler/arkc-frontend-alt",
   "compiler/arkc-parser",
   "compiler/arkc-bytecode",
+  "runtime/ark-rt",
+  "runtime/ark-vm",
+  "runtime/ark-rt-staticlib",
 ]
 resolver = "2"

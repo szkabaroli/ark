@@ -5,6 +5,7 @@ name = "parser"
 version = "0.0.2"
 
 [dependencies]
+id-arena="*"
 
 [profile.release]
 lto = true

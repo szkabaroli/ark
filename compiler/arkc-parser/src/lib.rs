@@ -1,5 +1,6 @@
 pub use self::ast::NodeId;
 pub use self::error::{ParseError, ParseErrorWithLocation};
+pub use self::source_file::{SourceFile, SourceFileId};
 pub use self::green::{GreenElement, GreenNode, GreenToken, GreenTreeBuilder};
 pub use self::lexer::lex;
 pub use self::span::Span;
@@ -8,6 +9,7 @@ pub use self::parser::Parser;
 
 pub mod ast;
 pub mod parser;
+pub mod source_file;
 mod error;
 mod green;
 mod lexer;

@@ -1,14 +1,16 @@
-use std::sync::Arc;
+use std::{
+    num::ParseIntError,
+    sync::{atomic::AtomicUsize, Arc},
+};
 
 use crate::{
-    ast::{
-        self, BinOp, BinOpKind, CmpOp, Elem, ElemData, Expr, ExprKind, FlowExpr, FlowExprData,
-        FlowStmtData, Ident, IdentData, ModifierList, Param, Path, PathData, Stmt, StmtData, Type,
-        TypeData, UnOp,
-    },
+    ast::{self, *},
     green::{GreenTreeBuilder, Marker},
     lex,
-    token::{TokenSet, ELEM_FIRST, EMPTY, EXPRESSION_FIRST, FLOW_EXPRESSION_FIRST, PARAM_LIST_RS},
+    source_file::{SourceFile, SourceFileId},
+    token::{
+        TokenSet, ELEM_FIRST, EMPTY, EXPRESSION_FIRST, FIELD_FIRST, FIELD_VALUE_FIRST, FLOW_EXPRESSION_FIRST, IMPORT_PATH_ATOM_FIRST, MODIFIER_FIRST, PARAM_LIST_RS
+    },
     NodeId, ParseError, ParseErrorWithLocation, Span,
     TokenKind::{self, *},
 };
@@ -23,11 +25,30 @@ enum FlowStmtOrExpr {
     Expr(ast::FlowExpr),
 }
 
+pub struct NodeIdGenerator(AtomicUsize);
+
+impl NodeIdGenerator {
+    pub fn new() -> Self {
+        NodeIdGenerator(AtomicUsize::new(0))
+    }
+
+    fn new_node_id(&self) -> NodeId {
+        let value = self.0.load(std::sync::atomic::Ordering::Relaxed);
+        self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        NodeId(value)
+    }
+}
+
+fn parse_string_to_i64(input: &str) -> Result<i64, ParseIntError> {
+    input.parse::<i64>()
+}
+
 pub struct Parser {
+    source_id: SourceFileId,
     tokens: Vec<TokenKind>,
     token_widths: Vec<u32>,
     token_idx: usize,
-    next_node_id: usize,
+    id_gen: Arc<NodeIdGenerator>,
     content: Arc<String>,
     errors: Vec<ParseErrorWithLocation>,
     nodes: Vec<(usize, u32)>,
@@ -36,23 +57,27 @@ pub struct Parser {
 }
 
 impl Parser {
-    pub fn from_string(code: &'static str) -> Parser {
-        let content = Arc::new(String::from(code));
-        Parser::common_init(content)
+    pub fn from_source(id_gen: Arc<NodeIdGenerator>, source: &SourceFile) -> Parser {
+        Parser::common_init(
+            id_gen,
+            source.id.get().unwrap().clone(),
+            source.content.clone(),
+        )
     }
 
-    pub fn from_shared_string(content: Arc<String>) -> Parser {
-        Parser::common_init(content)
-    }
-
-    fn common_init(content: Arc<String>) -> Parser {
-        let result = lex(&*content);
+    fn common_init(
+        id_gen: Arc<NodeIdGenerator>,
+        source_id: SourceFileId,
+        content: Arc<String>,
+    ) -> Parser {
+        let result = lex(source_id, &*content);
 
         Parser {
+            source_id,
             tokens: result.tokens,
             token_widths: result.widths,
             token_idx: 0,
-            next_node_id: 0,
+            id_gen,
             offset: 0,
             content,
             errors: result.errors,
@@ -81,13 +106,63 @@ impl Parser {
         }
 
         let green = self.builder.finish_node(SOURCE_FILE);
-        ast::File { green, elements }
+        ast::File {
+            source_id: self.source_id,
+            green,
+            elements,
+        }
+    }
+
+    fn parse_modifiers(&mut self) -> Option<ModifierList> {
+        if self.is_set(MODIFIER_FIRST) {
+            self.start_node();
+            let marker = self.builder.create_marker();
+            let mut modifiers: Vec<Modifier> = Vec::new();
+
+            while self.is_set(MODIFIER_FIRST) {
+                modifiers.push(self.parse_modifier());
+            }
+
+            assert!(!modifiers.is_empty());
+            let green = self.builder.finish_node_starting_at(MODIFIERS, marker);
+
+            Some(ModifierList {
+                id: self.new_node_id(),
+                span: self.finish_node(),
+                green,
+                modifiers,
+            })
+        } else {
+            None
+        }
+    }
+
+    fn parse_modifier(&mut self) -> Modifier {
+        self.start_node();
+        let m = self.builder.create_marker();
+
+        if self.eat(PUB_KW) {
+            // done
+        } else if self.eat(STATIC_KW) {
+            // done
+        } else {
+            self.assert(AT);
+            self.expect_identifier();
+        }
+
+        let green = self.builder.finish_node_starting_at(MODIFIER, m);
+
+        Modifier {
+            id: self.new_node_id(),
+            span: self.finish_node(),
+            green,
+        }
     }
 
     fn parse_element(&mut self) -> Elem {
         self.builder.start_node();
 
-        //let modifiers = self.parse_modifiers();
+        let modifiers = self.parse_modifiers();
 
         match self.current() {
             FN_KW => {
@@ -104,11 +179,10 @@ impl Parser {
                 let class = self.parse_class(modifiers);
                 Arc::new(ElemData::Class(class))
             }*/
-
-            /*STRUCT_KW => {
-                let struc = self.parse_struct(modifiers);
+            STRUCT_KW => {
+                let struc = self.parse_struct();
                 Arc::new(ElemData::Struct(struc))
-            }*/
+            }
 
             /*TRAIT_KW => {
                 let trait_ = self.parse_trait(modifiers);
@@ -139,11 +213,10 @@ impl Parser {
                 let module = self.parse_module(modifiers);
                 Arc::new(ElemData::Module(module))
             }*/
-
-            /*USE_KW => {
-                let use_stmt = self.parse_use(modifiers);
-                Arc::new(ElemData::Use(use_stmt))
-            }*/
+            IMPORT_KW => {
+                let import_stmt = self.parse_import(modifiers);
+                Arc::new(ElemData::Import(import_stmt))
+            }
 
             /*EXTERN_KW => {
                 let extern_stmt = self.parse_extern(modifiers);
@@ -155,7 +228,7 @@ impl Parser {
                 Arc::new(ElemData::TypeAlias(type_alias))
             }*/
             _ => {
-                //assert!(!ELEM_FIRST.contains(self.current()));
+                assert!(!ELEM_FIRST.contains(self.current()));
                 let span = self.current_span();
                 self.report_error_at(ParseError::ExpectedElement, span);
                 self.advance();
@@ -184,9 +257,9 @@ impl Parser {
     fn current_span(&self) -> Span {
         if self.token_idx < self.tokens.len() {
             let length = self.token_widths[self.token_idx];
-            Span::new(self.offset, length)
+            Span::new(self.source_id, self.offset, length)
         } else {
-            Span::at(self.offset)
+            Span::at(self.source_id, self.offset)
         }
     }
 
@@ -207,7 +280,7 @@ impl Parser {
     }
 
     fn assert(&mut self, kind: TokenKind) {
-        assert!(self.eat(kind));
+        assert!(self.eat(kind), "assert {:?}, {:?}", kind, self.current());
     }
 
     fn expect_identifier(&mut self) -> Option<Ident> {
@@ -218,6 +291,7 @@ impl Parser {
             let value = self.source_span(span);
 
             Some(Arc::new(IdentData {
+                id: self.new_node_id(),
                 span,
                 name_as_string: value,
             }))
@@ -249,9 +323,7 @@ impl Parser {
     }
 
     fn new_node_id(&mut self) -> NodeId {
-        let value = self.next_node_id;
-        self.next_node_id += 1;
-        NodeId(value)
+        self.id_gen.new_node_id()
     }
 
     fn start_node(&mut self) {
@@ -274,7 +346,7 @@ impl Parser {
             end_token -= 1;
         }
 
-        Span::new(start_offset, end_offset - start_offset)
+        Span::new(self.source_id, start_offset, end_offset - start_offset)
     }
 
     fn is_eof(&self) -> bool {
@@ -302,6 +374,150 @@ impl Parser {
             self.builder.token(kind, value);
             self.token_idx += 1;
         }
+    }
+
+    fn parse_import(&mut self, modifiers: Option<ModifierList>) -> Arc<Import> {
+        self.start_node();
+        self.assert(IMPORT_KW);
+        let path = self.parse_import_path();
+        self.expect(SEMICOLON);
+
+        let green = self.builder.finish_node(IMPORT);
+
+        Arc::new(Import {
+            id: self.new_node_id(),
+            span: self.finish_node(),
+            green,
+            modifiers,
+            path,
+        })
+    }
+
+    fn parse_import_path(&mut self) -> Arc<ImportPath> {
+        self.start_node();
+        self.builder.start_node();
+        let mut path = Vec::new();
+
+        let target = if self.is_set(IMPORT_PATH_ATOM_FIRST) {
+            path.push(self.parse_import_atom());
+
+            while self.is(COLON_COLON) && self.nth_is_set(1, IMPORT_PATH_ATOM_FIRST) {
+                self.advance();
+                path.push(self.parse_import_atom());
+            }
+
+            ImportPathDescriptor::Default
+        } else {
+            self.report_error(ParseError::ExpectedUsePath);
+            ImportPathDescriptor::Error
+        };
+
+        let green = self.builder.finish_node(IMPORT_PATH);
+
+        Arc::new(ImportPath {
+            id: self.new_node_id(),
+            span: self.finish_node(),
+            green,
+            path,
+            target,
+        })
+    }
+
+    fn parse_import_atom(&mut self) -> ImportAtom {
+        assert!(self.is_set(IMPORT_PATH_ATOM_FIRST));
+        self.start_node();
+        self.builder.start_node();
+
+        let value = if self.eat(PACKAGE_KW) {
+            ImportPathComponentValue::Package
+        } else {
+            let name = self.expect_identifier();
+            if let Some(name) = name {
+                ImportPathComponentValue::Name(name)
+            } else {
+                ImportPathComponentValue::Error
+            }
+        };
+
+        let green = self.builder.finish_node(IMPORT_COMPONENT);
+
+        ImportAtom {
+            green,
+            span: self.finish_node(),
+            value,
+        }
+    }
+
+    fn parse_struct_field(&mut self) -> StructField {
+        self.start_node();
+        self.builder.start_node();
+
+        let ident = self.expect_identifier();
+
+        self.expect(COLON);
+        let ty = self.parse_type();
+
+        let green = self.builder.finish_node(STRUCT_FIELD);
+
+        StructField {
+            id: self.new_node_id(),
+            span: self.finish_node(),
+            green,
+            name: ident,
+            ty,
+        }
+    }
+
+    fn parse_struct(&mut self) -> Arc<ast::StructItem> {
+        self.start_node();
+        self.assert(STRUCT_KW);
+        let ident = self.expect_identifier();
+
+        let fields = if self.is(L_PAREN) {
+            self.parse_list(
+                L_PAREN,
+                COMMA,
+                R_PAREN,
+                ELEM_FIRST,
+                ParseError::ExpectedField,
+                LIST,
+                |p| {
+                    if p.is_set(FIELD_FIRST) {
+                        Some(p.parse_struct_field())
+                    } else {
+                        None
+                    }
+                },
+            )
+        } else if self.is(L_BRACE) {
+            self.parse_list(
+                L_BRACE,
+                COMMA,
+                R_BRACE,
+                ELEM_FIRST,
+                ParseError::ExpectedField,
+                LIST,
+                |p| {
+                    if p.is_set(FIELD_FIRST) {
+                        Some(p.parse_struct_field())
+                    } else {
+                        None
+                    }
+                },
+            )
+        } else {
+            Vec::new()
+        };
+
+        let green = self.builder.finish_node(STRUCT);
+
+        Arc::new(StructItem {
+            id: self.new_node_id(),
+            name: ident,
+            green,
+            span: self.finish_node(),
+            fields,
+        })
     }
 
     fn parse_flow(&mut self, modifiers: Option<ModifierList>) -> Arc<ast::Flow> {
@@ -337,7 +553,7 @@ impl Parser {
         let params = self.parse_function_params();
         let return_type = self.parse_function_type();
         let declaration_span = self.span_from(start);
-        let block = self.parse_function_body();
+        let body = self.parse_function_body();
 
         let green = self.builder.finish_node(FN);
 
@@ -347,12 +563,12 @@ impl Parser {
             name,
             declaration_span,
             span: self.finish_node(),
-            sig: ast::FnSig {
+            signature: ast::FnSignature {
                 inputs: params,
                 output: return_type,
                 span: declaration_span,
             },
-            block,
+            body,
         })
     }
 
@@ -729,6 +945,39 @@ impl Parser {
         }
     }
 
+    fn parse_let_pattern(&mut self) -> Box<PatternKind> {
+        self.start_node();
+
+        //let mutable = self.eat(MUT_KW);
+        let name = self.expect_identifier();
+
+        Box::new(PatternKind::Ident(LetIdentType {
+            id: self.new_node_id(),
+            span: self.finish_node(),
+            mutable: false,
+            name,
+        }))
+    }
+
+    fn parse_let(&mut self) -> Stmt {
+        self.start_node();
+
+        self.assert(LET_KW);
+        let pattern = self.parse_let_pattern();
+        let data_type = self.parse_var_type();
+        let expr = self.parse_var_assignment();
+
+        self.expect(SEMICOLON);
+
+        Arc::new(StmtData::create_let(
+            self.new_node_id(),
+            self.finish_node(),
+            pattern,
+            data_type,
+            expr,
+        ))
+    }
+
     fn parse_flow_node(&mut self) -> ast::FlowStmt {
         self.start_node();
 
@@ -747,7 +996,7 @@ impl Parser {
 
     fn parse_function_stmt_or_expr(&mut self) -> StmtOrExpr {
         match self.current() {
-            // LET_KW => StmtOrExpr::Stmt(self.parse_let()),
+            LET_KW => StmtOrExpr::Stmt(self.parse_let()),
             _ => {
                 let expr = self.parse_expression();
 
@@ -791,7 +1040,7 @@ impl Parser {
                 EQ_EQ | NOT_EQ | LT | LE | GT | GE | EQ_EQ_EQ | NOT_EQ_EQ => 4,
                 ADD | SUB | OR | CARET => 5,
                 MUL | DIV | MODULO | AND | LT_LT | GT_GT | GT_GT_GT => 6,
-                //AS_KW | IS_KW => 7,
+                L_BRACE => 7,
                 _ => {
                     return left;
                 }
@@ -802,9 +1051,10 @@ impl Parser {
             }
 
             let kind = self.current();
-            self.advance();
+            
 
             left = match kind {
+                L_BRACE => self.parse_lit_struct(start, marker.clone(), left),
                 /*AS_KW => {
                     let right = self.parse_type();
                     let span = self.span_from(start);
@@ -829,6 +1079,7 @@ impl Parser {
                     Arc::new(expr)
                 }*/
                 _ => {
+                    self.advance();
                     let right = self.parse_binary_expr(right_precedence);
                     self.builder
                         .finish_node_starting_at(BINARY_EXPR, marker.clone());
@@ -971,6 +1222,40 @@ impl Parser {
         }
     }
 
+    fn parse_lit_struct(&mut self, start: u32, marker: Marker, left: Expr) -> Expr {
+        let span = self.span_from(start);
+
+        let fields = if self.is(L_BRACE) {
+            self.parse_list(
+                L_BRACE,
+                COMMA,
+                R_BRACE,
+                ELEM_FIRST,
+                ParseError::ExpectedField,
+                LIST,
+                |p| {
+                    if p.is_set(FIELD_VALUE_FIRST) {
+                        Some(p.parse_field_value())
+                    } else {
+                        None
+                    }
+                },
+            )
+        } else {
+            Vec::new()
+        };
+
+        self.builder
+            .finish_node_starting_at(STRUCT, marker.clone());
+
+        Arc::new(ExprKind::Struct(ExprStruct {
+            id: self.new_node_id(),
+            span,
+            name: left,
+            field_values: fields,
+        }))
+    }
+
     fn parse_call(&mut self, start: u32, marker: Marker, left: Expr) -> Expr {
         let args = self.parse_list(
             L_PAREN,
@@ -1096,7 +1381,7 @@ impl Parser {
         }
     }
 
-    fn parse_lit_bool(&mut self) -> ast::Lit {
+    fn parse_lit_bool(&mut self) -> ast::Literal {
         self.builder.start_node();
         let span = self.current_span();
         let kind = self.current();
@@ -1104,7 +1389,7 @@ impl Parser {
         let green = self.builder.finish_node(BOOL_LIT_EXPR);
         let value = kind == TRUE;
 
-        ast::Lit {
+        ast::Literal {
             id: self.new_node_id(),
             span,
             green,
@@ -1112,15 +1397,14 @@ impl Parser {
         }
     }
 
-    fn parse_lit_int(&mut self) -> ast::Lit {
+    fn parse_lit_int(&mut self) -> ast::Literal {
         let span = self.current_span();
         self.builder.start_node();
         self.assert(INT_LITERAL);
         let value = self.source_span(span);
-
         let green = self.builder.finish_node(INT_LIT_EXPR);
 
-        ast::Lit {
+        ast::Literal {
             id: self.new_node_id(),
             span,
             green,
@@ -1128,7 +1412,7 @@ impl Parser {
         }
     }
 
-    fn parse_lit_float(&mut self) -> ast::Lit {
+    fn parse_lit_float(&mut self) -> ast::Literal {
         let span = self.current_span();
         self.builder.start_node();
         self.assert(FLOAT_LITERAL);
@@ -1136,7 +1420,7 @@ impl Parser {
 
         let green = self.builder.finish_node(FLOAT_LIT_EXPR);
 
-        ast::Lit {
+        ast::Literal {
             id: self.new_node_id(),
             span,
             green,
@@ -1293,11 +1577,11 @@ impl Parser {
         Arc::from(match self.current() {
             L_PAREN => ExprKind::Paren(self.parse_parentheses()),
             L_BRACE => ExprKind::Block(self.parse_block()),
-            INT_LITERAL => ExprKind::Lit(self.parse_lit_int()),
-            FLOAT_LITERAL => ExprKind::Lit(self.parse_lit_float()),
+            INT_LITERAL => ExprKind::Literal(self.parse_lit_int()),
+            FLOAT_LITERAL => ExprKind::Literal(self.parse_lit_float()),
             IDENTIFIER => ExprKind::Ident(self.parse_identifier()),
-            TRUE => ExprKind::Lit(self.parse_lit_bool()),
-            FALSE => ExprKind::Lit(self.parse_lit_bool()),
+            TRUE => ExprKind::Literal(self.parse_lit_bool()),
+            FALSE => ExprKind::Literal(self.parse_lit_bool()),
             RETURN_KW => ExprKind::Return(self.parse_return()),
             _ => {
                 self.report_error(ParseError::ExpectedFactor);
@@ -1337,7 +1621,30 @@ impl Parser {
     }
 
     fn span_from(&self, start: u32) -> Span {
-        Span::new(start, self.offset - start)
+        Span::new(self.source_id, start, self.offset - start)
+    }
+
+    fn nth_is_set(&self, idx: usize, set: TokenSet) -> bool {
+        set.contains(self.nth(idx))
+    }
+
+    fn parse_field_value(&mut self) -> FieldValue {
+        self.start_node();
+        self.builder.start_node();
+
+        let ident = self.expect_identifier();
+        self.expect(COLON);
+        let value = self.parse_expression();
+
+        let green = self.builder.finish_node(FIELD_VALUE);
+
+        FieldValue {
+            id: self.new_node_id(),
+            span: self.finish_node(),
+            green,
+            name: ident,
+            value,
+        }
     }
 }
 
@@ -1365,14 +1672,27 @@ fn token_name(kind: TokenKind) -> Option<&'static str> {
 
 #[cfg(test)]
 mod tests {
+    use id_arena::Arena;
+
+    use crate::source_file::{SourceFile, SourceFileId};
     use crate::{ast::*, compute_line_column, compute_line_starts};
     use std::sync::Arc;
 
     use crate::error::ParseError;
-    use crate::parser::Parser;
+    use crate::parser::{NodeIdGenerator, Parser};
+
+    fn create_source<'a>(code: &'static str) -> (Arena<SourceFile>, SourceFileId) {
+        let mut sources: Arena<SourceFile> = Arena::new();
+        let id = sources.alloc(SourceFile::new("test.ark".into(), code));
+        sources.get(id).unwrap().id.set(id).unwrap();
+
+        (sources, id)
+    }
 
     fn parse_expr(code: &'static str) -> Expr {
-        let mut parser = Parser::from_string(code);
+        let id_gen = Arc::from(NodeIdGenerator::new());
+        let (sources, id) = create_source(code);
+        let mut parser = Parser::from_source(id_gen, &sources[id]);
 
         let result = parser.parse_expression();
         assert!(parser.errors.is_empty());
@@ -1381,14 +1701,18 @@ mod tests {
     }
 
     fn parse(code: &'static str) -> Arc<File> {
-        let (file, errors) = Parser::from_string(code).parse();
+        let id_gen = Arc::from(NodeIdGenerator::new());
+        let (sources, id) = create_source(code);
+        let (file, errors) = Parser::from_source(id_gen, &sources[id]).parse();
         println!("{:#?}", errors);
         assert!(errors.is_empty());
         file
     }
 
     fn err_expr(code: &'static str, msg: ParseError, line: u32, col: u32) {
-        let mut parser = Parser::from_string(code);
+        let id_gen = Arc::from(NodeIdGenerator::new());
+        let (sources, id) = create_source(code);
+        let mut parser = Parser::from_source(id_gen, &sources[id]);
 
         let _expr = parser.parse_expression();
 
@@ -1901,8 +2225,8 @@ mod tests {
         let fct = prog.fct0();
 
         assert_eq!("b", fct.name.as_ref().unwrap().name_as_string);
-        assert_eq!(0, fct.sig.inputs.len());
-        assert!(fct.sig.output.is_none());
+        assert_eq!(0, fct.signature.inputs.len());
+        assert!(fct.signature.output.is_none());
     }
 
     #[test]
@@ -1913,11 +2237,11 @@ mod tests {
         let p2 = parse("fn f(a:int,) { }");
         let f2 = p2.fct0();
 
-        assert_eq!(f1.sig.inputs.len(), 1);
-        assert_eq!(f2.sig.inputs.len(), 1);
+        assert_eq!(f1.signature.inputs.len(), 1);
+        assert_eq!(f2.signature.inputs.len(), 1);
 
-        let p1 = &f1.sig.inputs[0];
-        let p2 = &f2.sig.inputs[0];
+        let p1 = &f1.signature.inputs[0];
+        let p2 = &f2.signature.inputs[0];
 
         assert_eq!("a", p1.name.as_ref().unwrap().name_as_string);
         assert_eq!("a", p2.name.as_ref().unwrap().name_as_string);
@@ -1934,10 +2258,10 @@ mod tests {
         let p2 = parse("fn f(a:int, b:str,) { }");
         let f2 = p2.fct0();
 
-        let p1a = &f1.sig.inputs[0];
-        let p1b = &f1.sig.inputs[1];
-        let p2a = &f2.sig.inputs[0];
-        let p2b = &f2.sig.inputs[1];
+        let p1a = &f1.signature.inputs[0];
+        let p1b = &f1.signature.inputs[1];
+        let p2a = &f2.signature.inputs[0];
+        let p2b = &f2.signature.inputs[1];
 
         assert_eq!("a", p1a.name.as_ref().unwrap().name_as_string);
         assert_eq!("a", p2a.name.as_ref().unwrap().name_as_string);
@@ -2116,5 +2440,47 @@ mod tests {
             (entry.a -> gt.a, entry.b -> gt.b) -> branch.cond;
         }"#,
         );
+    }
+
+    #[test]
+    fn parse_struct_empty() {
+        let prog = parse("struct Foo {}");
+        let struc = prog.struct0();
+        assert_eq!(0, struc.fields.len());
+        assert_eq!("Foo", struc.name.as_ref().unwrap().name_as_string);
+    }
+
+    #[test]
+    fn parse_struct_one_field() {
+        let prog = parse(
+            "struct Bar {
+            f1: Foo1,
+        }",
+        );
+        let struc = prog.struct0();
+        assert_eq!(1, struc.fields.len());
+        assert_eq!("Bar", struc.name.as_ref().unwrap().name_as_string);
+
+        let f1 = &struc.fields[0];
+        assert_eq!("f1", f1.name.as_ref().unwrap().name_as_string);
+    }
+
+    #[test]
+    fn parse_struct_multiple_fields() {
+        let prog = parse(
+            "struct FooBar {
+            fa: Foo1,
+            fb: Foo2,
+        }",
+        );
+        let struc = prog.struct0();
+        assert_eq!(2, struc.fields.len());
+        assert_eq!("FooBar", struc.name.as_ref().unwrap().name_as_string);
+
+        let f1 = &struc.fields[0];
+        assert_eq!("fa", f1.name.as_ref().unwrap().name_as_string);
+
+        let f2 = &struc.fields[1];
+        assert_eq!("fb", f2.name.as_ref().unwrap().name_as_string);
     }
 }

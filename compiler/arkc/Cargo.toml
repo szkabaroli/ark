@@ -6,10 +6,10 @@ version = "0.0.2"
 
 [dependencies]
 anstyle = "1.0"
-#arkc-codegen-llvm = {path = "../arkc-codegen-llvm", optional = true}
-arkc-frontend-alt = {path = "../arkc-frontend-alt"}
+arkc-codegen-llvm = {path = "../arkc-codegen-llvm", optional = true}
+arkc-codegen-bc = {path = "../arkc-codegen-bc", optional = true}
+arkc-frontend = {path = "../arkc-frontend"}
 bincode = "2.0.0-rc.3"
-bytecode = {path = "../arkc-bytecode"}
 clap = {version = "4.5", features = ["derive"]}
 id-arena="*"
 
@@ -18,5 +18,6 @@ lto = true
 panic = 'abort'
 
 [features]
-#default = ["llvm"]
-#llvm = ["arkc-codegen-llvm"]
+default = ["llvm", "bc"]
+llvm = ["arkc-codegen-llvm"]
+bc = ["arkc-codegen-bc"]

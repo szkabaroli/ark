@@ -1,11 +1,15 @@
-use crate::error::msg::ErrorMessage;
-use crate::sema::{ModuleDefinitionId, Sema, SourceFileId};
-use crate::specialize::{replace_type, specialize_type, AliasReplacement};
-use crate::sym::{ModuleSymTable, SymTable, SymbolKind};
-use crate::{SourceType, SourceTypeArray};
-use std::rc::Rc;
+use std::{borrow::Borrow, cell::RefCell, rc::Rc};
 
-use parser::ast::{self, TypeBasicType};
+use crate::{
+    compilation::ModuleId,
+    error::msg::ErrorMessage,
+    sym::{ModuleSymTable, SymTable, SymbolKind},
+    Sema,
+};
+use arkc_hir::{
+    hir,
+    ty::{FnType, PrimitiveType, Type},
+};
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub enum AllowSelf {
@@ -13,248 +17,138 @@ pub enum AllowSelf {
     No,
 }
 
-pub fn parse_type(
-    sa: &Sema,
-    table: &ModuleSymTable,
-    file_id: SourceFileId,
-    t: &ast::TypeData,
-) -> SourceType {
+pub fn parse_type(sa: &Sema, root: &hir::File, table: &ModuleSymTable, t: &hir::TypeData) -> Type {
     match *t {
-        ast::TypeData::This(_) => SourceType::This,
-        ast::TypeData::Basic(ref node) => read_type_basic_unchecked(sa, table, file_id, node),
+        hir::TypeData::_Self => todo!(),
+        hir::TypeData::Basic(ref node) => read_type_basic_unchecked(sa, root, table, node),
+        hir::TypeData::Fn(ref node) => read_type_fn_unchecked(sa, root, table, node),
         //ast::TypeData::Tuple(ref node) => read_type_tuple_unchecked(sa, table, file_id, node),
-        //ast::TypeData::Lambda(ref node) => read_type_lambda_unchecked(sa, table, file_id, node),
         //ast::TypeData::Generic(..) | ast::TypeData::Path(..) => unreachable!(),
-        ast::TypeData::Unknown { .. } => SourceType::Unknown,
+        hir::TypeData::Unknown { .. } => Type::Unknown,
     }
 }
 
-fn read_type_basic_unchecked(
-    sa: &Sema,
-    table: &ModuleSymTable,
-    file_id: SourceFileId,
-    node: &TypeBasicType,
-) -> SourceType {
-    let sym = read_type_path(sa, table, file_id, node);
+fn read_type_fn_unchecked(sa: &Sema, root: &hir::File, table: &ModuleSymTable, node: &hir::FnType) -> Type {
+    let mut params = vec![];
+
+    for param in &node.params {
+        let ty = parse_type(sa, root, table, param);
+        params.push(ty);
+    }
+
+    //let params = SourceTypeArray::with(params);
+
+    let return_type = if let Some(ref ret) = node.ret {
+        parse_type(sa, root, table, ret)
+    } else {
+        Type::Primitive(PrimitiveType::Unit)
+    };
+
+    Type::Function(FnType {
+        inputs: vec![],
+        output: Some(Box::new(return_type)),
+        is_varargs: false,
+    })
+}
+
+fn read_type_basic_unchecked(sa: &Sema, root: &hir::File, table: &ModuleSymTable, basic: &hir::BasicType) -> Type {
+    let sym = read_type_path(sa, table, basic);
 
     if sym.is_err() {
-        return SourceType::Unknown;
+        return Type::Unknown;
     }
 
     let sym = sym.unwrap();
 
-    let mut type_params = Vec::new();
-
-    for param in &node.params {
-        let ty = parse_type(sa, table, file_id, param);
-        type_params.push(ty);
-    }
-
-    let type_params = SourceTypeArray::with(type_params);
-
     match sym {
-        //Some(SymbolKind::Class(class_id)) => SourceType::Class(class_id, type_params),
-        //Some(SymbolKind::Trait(trait_id)) => SourceType::Trait(trait_id, type_params),
-        //Some(SymbolKind::Struct(struct_id)) => {
-        //    let struct_ = sa.struct_(struct_id);
+        Some(SymbolKind::Struct(struct_id)) => {
+            let stru = root.get_struct(&struct_id).unwrap();
 
-        //    if let Some(ref primitive_ty) = struct_.primitive_ty {
-        //        if type_params.is_empty() {
-        //            primitive_ty.clone()
-        //        } else {
-        //            let msg = ErrorMessage::WrongNumberTypeParams(0, type_params.len());
-        //            sa.report(file_id, node.span, msg);
-        //            SourceType::Error
-        //        }
-        //    } else {
-        //        SourceType::Struct(struct_id, type_params)
-        //    }
-        //}
-        //Some(SymbolKind::Enum(enum_id)) => SourceType::Enum(enum_id, type_params),
-        //Some(SymbolKind::TypeParam(type_param_id)) => {
-        //    if !node.params.is_empty() {
-        //        let msg = ErrorMessage::NoTypeParamsExpected;
-        //        sa.report(file_id, node.span, msg);
-        //    }
-
-        //    SourceType::TypeParam(type_param_id)
-        //}
-
-        //Some(SymbolKind::TypeAlias(alias_id)) => {
-        //    if !node.params.is_empty() {
-        //        let msg = ErrorMessage::NoTypeParamsExpected;
-        //        sa.report(file_id, node.span, msg);
-        //    }
-
-        //    SourceType::TypeAlias(alias_id)
-        //}
+            if let Some(ref primitive_ty) = stru.primitive_ty {
+                Type::Primitive(primitive_ty.clone())
+            } else {
+                Type::Struct(struct_id)
+            }
+        }
         Some(_) => {
-            let name = node
-                .path
-                .names
-                .last()
-                .cloned()
-                .unwrap()
-                .name_as_string
-                .clone();
+            let name = basic.path.names.last().cloned().unwrap().name.clone();
             let msg = ErrorMessage::UnknownType(name);
-            sa.report(file_id, node.span, msg);
-            SourceType::Unknown
+            panic!("{:?}", msg);
+            // sa.report(node.span, msg);
+            Type::Unknown
         }
 
         None => {
-            let name = node
-                .path
-                .names
-                .last()
-                .cloned()
-                .unwrap()
-                .name_as_string
-                .clone();
-            let msg = ErrorMessage::UnknownIdentifier(name.clone());
-            println!("{:?}", name);
-            sa.report(file_id, node.span, msg);
-            SourceType::Unknown
+            let name = basic.path.names.last().cloned().unwrap().name.clone();
+            let msg = ErrorMessage::UnknownIdentifier(name);
+            panic!("{:?}", msg);
+            // sa.report(node.span, msg);
+            Type::Unknown
         }
     }
 }
 
-/*fn read_type_lambda_unchecked(
+fn read_type_path(
     sa: &Sema,
     table: &ModuleSymTable,
-    file_id: SourceFileId,
-    node: &TypeLambdaType,
-) -> SourceType {
-    let mut params = vec![];
+    basic: &hir::BasicType,
+) -> Result<Option<SymbolKind>, ()> {
+    let names = &basic.path.names;
 
-    for param in &node.params {
-        let ty = parse_type(sa, table, file_id, param);
-        params.push(ty);
-    }
+    if names.len() > 1 {
+        let first_name = sa.interner.intern(&names.first().cloned().unwrap().name);
 
-    let params = SourceTypeArray::with(params);
+        let last_name = sa.interner.intern(&names.last().cloned().unwrap().name);
 
-    let return_type = if let Some(ref ret) = node.ret {
-        parse_type(sa, table, file_id, ret)
+        let mut module_table = table_for_module(sa, basic, table.get(first_name))?;
+
+        for ident in &names[1..names.len() - 1] {
+            let name = sa.interner.intern(&ident.name);
+            let sym = module_table.get(name);
+            module_table = table_for_module(sa, basic, sym)?;
+        }
+
+        let sym = module_table.get(last_name);
+        Ok(sym)
     } else {
-        SourceType::Unit
-    };
+        let name = &names.last().cloned().unwrap().name;
+        println!("{:?}", table.get_string(sa, name));
+        Ok(table.get_string(sa, name))
+    }
+}
 
-    SourceType::Lambda(params, Box::new(return_type))
-}*/
-
-/*fn read_type_tuple_unchecked(
+fn table_for_module(
     sa: &Sema,
-    table: &ModuleSymTable,
-    file_id: SourceFileId,
-    node: &TypeTupleType,
-) -> SourceType {
-    if node.subtypes.is_empty() {
-        return SourceType::Unit;
+    basic: &hir::BasicType,
+    sym: Option<SymbolKind>,
+) -> Result<Rc<SymTable>, ()> {
+    match sym {
+        Some(SymbolKind::Module(module_id)) => Ok(sa.compilation.module(module_id).table()),
+        _ => {
+            let msg = ErrorMessage::ExpectedModule;
+            panic!("{:?}", msg);
+            //sa.report(basic.span, msg);
+            Err(())
+        }
     }
-
-    let mut subtypes = Vec::new();
-
-    for subtype in &node.subtypes {
-        let ty = parse_type(sa, table, file_id, subtype);
-        subtypes.push(ty);
-    }
-
-    let subtypes = SourceTypeArray::with(subtypes);
-    SourceType::Tuple(subtypes)
-}*/
+}
 
 pub fn verify_type(
     sa: &Sema,
-    module_id: ModuleDefinitionId,
-    file_id: SourceFileId,
-    t: &ast::TypeData,
-    ty: SourceType,
-    // type_param_defs: &TypeParamDefinition,
+    module_id: ModuleId,
+    t: &hir::TypeData,
+    ty: Type,
     allow_self: AllowSelf,
 ) -> bool {
     match t {
-        &ast::TypeData::This(ref node) => {
-            assert_eq!(ty, SourceType::This);
-
-            if allow_self == AllowSelf::No {
-                sa.report(file_id, node.span, ErrorMessage::SelfTypeUnavailable);
+        &hir::TypeData::Basic(ref node) => {
+            if !verify_type_basic(sa, module_id, node, ty, allow_self) {
                 return false;
             }
         }
 
-        &ast::TypeData::Basic(ref node) => {
-            if !verify_type_basic(
-                sa, module_id, file_id, node, ty, //type_param_defs,
-                allow_self,
-            ) {
-                return false;
-            }
-        }
-
-        /*&ast::TypeData::Tuple(ref node) => {
-            assert!(ty.is_tuple_or_unit());
-
-            if ty.is_unit() {
-                assert_eq!(node.subtypes.len(), 0);
-                return true;
-            }
-
-            let subtypes = ty.tuple_subtypes();
-            assert_eq!(subtypes.len(), node.subtypes.len());
-
-            for (subtype, ast_param) in subtypes.iter().zip(node.subtypes.iter()) {
-                if !verify_type(
-                    sa,
-                    module_id,
-                    file_id,
-                    ast_param,
-                    subtype,
-                    type_param_defs,
-                    allow_self,
-                ) {
-                    return false;
-                }
-            }
-        }*/
-
-        /*&ast::TypeData::Lambda(ref node) => {
-            assert!(ty.is_lambda());
-
-            let (params, return_type) = ty.to_lambda().expect("lambda expected");
-
-            assert_eq!(params.len(), node.params.len());
-
-            for (param, ast_param) in params.iter().zip(node.params.iter()) {
-                if !verify_type(
-                    sa,
-                    module_id,
-                    file_id,
-                    ast_param,
-                    param,
-                    type_param_defs,
-                    allow_self,
-                ) {
-                    return false;
-                }
-            }
-
-            if let Some(ref ret) = node.ret {
-                if !verify_type(
-                    sa,
-                    module_id,
-                    file_id,
-                    ret,
-                    return_type,
-                    type_param_defs,
-                    allow_self,
-                ) {
-                    return false;
-                }
-            }
-        }*/
-        // ast::TypeData::Generic(..) | ast::TypeData::Path(..) => unreachable!(),
-        &ast::TypeData::Unknown { .. } => {}
+        &hir::TypeData::Unknown { .. } => {}
+        _ => todo!(),
     }
 
     true
@@ -262,94 +156,19 @@ pub fn verify_type(
 
 fn verify_type_basic(
     sa: &Sema,
-    module_id: ModuleDefinitionId,
-    file_id: SourceFileId,
-    node: &ast::TypeBasicType,
-    ty: SourceType,
-    //type_param_defs: &TypeParamDefinition,
+    module_id: ModuleId,
+    basic: &hir::BasicType,
+    ty: Type,
     allow_self: AllowSelf,
 ) -> bool {
     match ty {
-        //SourceType::TypeParam(_) => {}
-
-        //SourceType::Class(cls_id, type_params) => {
-        //    let cls = sa.class(cls_id);
-
-        //    if !class_accessible_from(sa, cls_id, module_id) {
-        //        let msg = ErrorMessage::NotAccessible(cls.name(sa));
-        //        sa.report(file_id, node.span, msg);
-        //        return false;
-        //    }
-
-        //    for (type_param, ast_type_param) in type_params.iter().zip(node.params.iter()) {
-        //        if !verify_type(
-        //            sa,
-        //            module_id,
-        //            file_id,
-        //            ast_type_param,
-        //            type_param,
-        //            type_param_defs,
-        //            allow_self,
-        //        ) {
-        //            return false;
-        //        }
-        //    }
-        //
-        //    if !check_type_params(
-        //        sa,
-        //        cls.type_params(),
-        //        type_params.types(),
-        //        file_id,
-        //        node.span,
-        //        type_param_defs,
-        //    ) {
-        //        return false;
-        //    }
-        //}
-
-        /*SourceType::Enum(enum_id, type_params) => {
-            let enum_ = sa.enum_(enum_id);
-
-            if !enum_accessible_from(sa, enum_id, module_id) {
-                let msg = ErrorMessage::NotAccessible(enum_.name(sa));
-                sa.report(file_id, node.span, msg);
-                return false;
-            }
-
-            for (type_param, ast_type_param) in type_params.iter().zip(node.params.iter()) {
-                if !verify_type(
-                    sa,
-                    module_id,
-                    file_id,
-                    ast_type_param,
-                    type_param,
-                    type_param_defs,
-                    allow_self,
-                ) {
-                    return false;
-                }
-            }
-
-            if !check_type_params(
-                sa,
-                enum_.type_params(),
-                type_params.types(),
-                file_id,
-                node.span,
-                type_param_defs,
-            ) {
-                return false;
-            }
-        }*/
-        SourceType::Bool
-        | SourceType::UInt8
-        | SourceType::Char
-        | SourceType::Int32
-        | SourceType::Int64
-        | SourceType::Float32
-        | SourceType::Float64 => {
+        Type::Primitive(PrimitiveType::Unit) => todo!(),
+        Type::Primitive(PrimitiveType::Bool)
+        | Type::Primitive(PrimitiveType::Char)
+        | Type::Primitive(PrimitiveType::Int32)
+        | Type::Primitive(PrimitiveType::Int64)
+        | Type::Primitive(PrimitiveType::Float64) => {
             return true;
-            
             //let struct_id = ty
             //    .primitive_struct_id(sa)
             //    .expect("primitive struct expected");
@@ -361,87 +180,19 @@ fn verify_type_basic(
             //    return false;
             //}
         }
+        Type::Any => todo!(),
+        Type::This => todo!(),
+        Type::Function(_) => todo!(),
+        Type::Struct(_) => {
+            // let struct_ = sa.struct_(struct_id);
 
-        /*SourceType::Struct(struct_id, type_params) => {
-            let struct_ = sa.struct_(struct_id);
-
-            if !struct_accessible_from(sa, struct_id, module_id) {
-                let msg = ErrorMessage::NotAccessible(struct_.name(sa));
-                sa.report(file_id, node.span, msg);
-                return false;
-            }
-
-            for (type_param, ast_type_param) in type_params.iter().zip(node.params.iter()) {
-                if !verify_type(
-                    sa,
-                    module_id,
-                    file_id,
-                    ast_type_param,
-                    type_param,
-                    type_param_defs,
-                    allow_self,
-                ) {
-                    return false;
-                }
-            }
-
-            if !check_type_params(
-                sa,
-                struct_.type_params(),
-                type_params.types(),
-                file_id,
-                node.span,
-                type_param_defs,
-            ) {
-                return false;
-            }
-        }*/
-
-        /*SourceType::Trait(trait_id, type_params) => {
-            let trait_ = &sa.trait_(trait_id);
-
-            if !trait_accessible_from(sa, trait_id, module_id) {
-                let msg = ErrorMessage::NotAccessible(trait_.name(sa));
-                sa.report(file_id, node.span, msg);
-                return false;
-            }
-
-            for (type_param, ast_type_param) in type_params.iter().zip(node.params.iter()) {
-                if !verify_type(
-                    sa,
-                    module_id,
-                    file_id,
-                    ast_type_param,
-                    type_param,
-                    type_param_defs,
-                    allow_self,
-                ) {
-                    return false;
-                }
-            }
-
-            if !check_type_params(
-                sa,
-                trait_.type_params(),
-                type_params.types(),
-                file_id,
-                node.span,
-                type_param_defs,
-            ) {
-                return false;
-            }
-        }*/
-        //SourceType::TypeAlias(..) => {
-        // The actual type is verified in the alias definition.
-        //}
-        SourceType::Unknown => {
-            return false;
+            //if !struct_accessible_from(sa, struct_id, module_id) {
+            //    let msg = ErrorMessage::NotAccessible(struct_.name(sa));
+            //    sa.report(file_id, node.span, msg);
+            //    return false;
+            //}
         }
-
-        _ => {
-            println!("ty = {} {:?}", ty.name(sa), ty);
-            unreachable!()
-        }
+        Type::Unknown => return false,
     }
 
     true
@@ -449,214 +200,79 @@ fn verify_type_basic(
 
 pub fn check_type(
     sa: &Sema,
+    root: &hir::File,
     table: &ModuleSymTable,
-    file_id: SourceFileId,
-    t: &ast::TypeData,
-    //type_param_defs: &TypeParamDefinition,
+    t: &hir::TypeData,
     allow_self: AllowSelf,
-) -> SourceType {
-    let ty = parse_type(sa, table, file_id, t);
+) -> Type {
+    let ty = parse_type(sa, root, table, t);
 
     let is_good = verify_type(
         sa,
         table.module_id(),
-        file_id,
         t,
         ty.clone(),
-        // type_param_defs,
         allow_self,
     );
 
     if is_good {
         ty
     } else {
-        SourceType::Unknown
+        Type::Unknown
     }
 }
-
-fn read_type_path(
-    sa: &Sema,
-    table: &ModuleSymTable,
-    file_id: SourceFileId,
-    basic: &TypeBasicType,
-) -> Result<Option<SymbolKind>, ()> {
-    let names = &basic.path.names;
-
-    if names.len() > 1 {
-        let first_name = sa
-            .interner
-            .intern(&names.first().cloned().unwrap().name_as_string);
-        let last_name = sa
-            .interner
-            .intern(&names.last().cloned().unwrap().name_as_string);
-        let mut module_table = table_for_module(sa, file_id, basic, table.get(first_name))?;
-
-        for ident in &names[1..names.len() - 1] {
-            let name = sa.interner.intern(&ident.name_as_string);
-            let sym = module_table.get(name);
-            module_table = table_for_module(sa, file_id, basic, sym)?;
-        }
-
-        let sym = module_table.get(last_name);
-        Ok(sym)
-    } else {
-        let name = &names.last().cloned().unwrap().name_as_string;
-        Ok(table.get_string(sa, name))
-    }
-}
-
-fn table_for_module(
-    sa: &Sema,
-    file_id: SourceFileId,
-    basic: &TypeBasicType,
-    sym: Option<SymbolKind>,
-) -> Result<Rc<SymTable>, ()> {
-    match sym {
-        Some(SymbolKind::Module(module_id)) => Ok(sa.module(module_id).table()),
-
-        _ => {
-            let msg = ErrorMessage::ExpectedModule;
-            sa.report(file_id, basic.span, msg);
-            Err(())
-        }
-    }
-}
-
-/*fn check_type_params(
-    sa: &Sema,
-    tp_definitions: &TypeParamDefinition,
-    type_params: &[SourceType],
-    file_id: SourceFileId,
-    span: Span,
-    type_param_defs: &TypeParamDefinition,
-) -> bool {
-    if tp_definitions.len() != type_params.len() {
-        let msg = ErrorMessage::WrongNumberTypeParams(tp_definitions.len(), type_params.len());
-        sa.report(file_id, span, msg);
-        return false;
-    }
-
-    let type_params_sta = SourceTypeArray::with(type_params.to_vec());
-
-    let mut success = true;
-
-    for bound in tp_definitions.bounds() {
-        let tp_ty = bound.ty();
-        let trait_ty = bound.trait_ty();
-        let tp_ty = specialize_type(sa, tp_ty, &type_params_sta);
-
-        if !implements_trait(sa, tp_ty.clone(), type_param_defs, trait_ty.clone()) {
-            let name = tp_ty.name_with_type_params(sa, type_param_defs);
-            let trait_name = trait_ty.name_with_type_params(sa, type_param_defs);
-            let msg = ErrorMessage::TypeNotImplementingTrait(name, trait_name);
-            sa.report(file_id, span, msg);
-            success = false;
-        }
-    }
-
-    success
-}*/
-
-/*pub fn parse_type_bound(
-    sa: &Sema,
-    symtable: &ModuleSymTable,
-    file_id: SourceFileId,
-    bound: &ast::TypeData,
-) -> SourceType {
-    let ty = parse_type(sa, &symtable, file_id, bound);
-
-    if ty.is_trait() {
-        ty
-    } else if !ty.is_unknown() {
-        let msg = ErrorMessage::BoundExpected;
-        sa.report(file_id, bound.span(), msg);
-        SourceType::Unknown
-    } else {
-        SourceType::Unknown
-    }
-}*/
 
 pub fn expand_type(
     sa: &Sema,
+    root: &hir::File,
     table: &ModuleSymTable,
-    file_id: SourceFileId,
-    t: &ast::TypeData,
-    //type_param_defs: &TypeParamDefinition,
+    t: &hir::TypeData,
     allow_self: AllowSelf,
-) -> SourceType {
-    let ty = parse_type(sa, table, file_id, t);
+) -> Type {
+    let ty = parse_type(sa, root, table, t);
 
-    let is_good = verify_type(
-        sa,
-        table.module_id(),
-        file_id,
-        t,
-        ty.clone(),
-        // type_param_defs,
-        allow_self,
-    );
+    let is_good = verify_type(sa, table.module_id(), t, ty.clone(), allow_self);
 
     if is_good {
-        replace_type(sa, ty, None, None, AliasReplacement::ReplaceWithActualType)
+        replace_type(sa, ty, None, AliasReplacement::ReplaceWithActualType)
     } else {
-        SourceType::Unknown
+        Type::Unknown
     }
 }
 
-/*
-#[cfg(test)]
-mod tests {
-    use crate::error::msg::ErrorMessage;
-    use crate::tests::*;
+#[derive(Clone)]
+pub enum AliasReplacement {
+    None,
+    // Map(&'a HashMap<AliasDefinitionId, SourceType>),
+    ReplaceWithActualType,
+    // ReplaceWithActualTypeKeepTrait(TraitDefinitionId),
+}
 
-    #[test]
-    fn module_class() {
-        ok("
-            fn f(x: foo::Foo) {}
-            mod foo { pub class Foo }
-        ");
-
-        err(
-            "
-            fn f(x: foo::Foo) {}
-            mod foo { class Foo }
-        ",
-            (2, 21),
-            ErrorMessage::NotAccessible("foo::Foo".into()),
-        );
+pub fn replace_type(
+    sa: &Sema,
+    ty: Type,
+    self_ty: Option<Type>,
+    alias_map: AliasReplacement,
+) -> Type {
+    match ty {
+        Type::This => {
+            if let Some(self_ty) = self_ty {
+                self_ty
+            } else {
+                ty
+            }
+        }
+        Type::Function(_) => todo!(),
+        Type::Primitive(PrimitiveType::Unit)
+        | Type::Primitive(PrimitiveType::Bool)
+        | Type::Primitive(PrimitiveType::Char)
+        | Type::Primitive(PrimitiveType::Int32)
+        | Type::Primitive(PrimitiveType::Int64)
+        | Type::Primitive(PrimitiveType::Float64)
+        | Type::Unknown => ty,
+        Type::Struct(id) => Type::Struct(id),
+        Type::Any => {
+            panic!("unexpected type = {:?}", ty);
+        }
     }
-
-    #[test]
-    fn mod_enum() {
-        ok("
-            fn f(x: foo::Foo) {}
-            mod foo { pub enum Foo { A, B } }
-        ");
-
-        err(
-            "
-            fn f(x: foo::Foo) {}
-            mod foo { enum Foo { A, B } }
-        ",
-            (2, 21),
-            ErrorMessage::NotAccessible("foo::Foo".into()),
-        );
-    }
-
-    #[test]
-    fn mod_trait() {
-        ok("
-            fn f(x: foo::Foo) {}
-            mod foo { pub trait Foo {} }
-        ");
-
-        err(
-            "
-            fn f(x: foo::Foo) {}
-            mod foo { trait Foo {} }
-        ",
-            (2, 21),
-            ErrorMessage::NotAccessible("foo::Foo".into()),
-        );
-    }
-}*/
+}

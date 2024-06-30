@@ -1,3 +1,15 @@
-fn main() {
-    return;
+struct Test {
+    a: Bool
 }
+
+fn main() -> Test {
+    let a: Bool = false;
+    let b = Test { a: a };
+    return b;
+}
+
+// Builtins
+struct Bool
+struct Int32
+struct Int64
+struct Float64
