@@ -1,4 +1,5 @@
 use arkc_hir::hir::HirId;
+use arkc_hir::hir::NestedVarId;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -6,7 +7,6 @@ use self::SymbolKind::*;
 
 use crate::compilation::ModuleId;
 use crate::interner::Name;
-use crate::typecheck::NestedVarId;
 use crate::Sema;
 
 pub struct ModuleSymTable {

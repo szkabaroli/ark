@@ -1,11 +1,13 @@
-// mod top_level;
+mod scopes;
 mod util;
 
 use arkc_frontend::compilation::Compilation;
 use arkc_hir::hir::{self, HirId};
 use arkc_hir::ty::{self, PrimitiveType, Type};
+use inkwell::support::get_llvm_version;
 use inkwell::types::{BasicTypeEnum, StructType};
 use parser::ast;
+use scopes::Scopes;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -15,11 +17,11 @@ use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::{Linkage, Module};
-use inkwell::passes::{PassManager, PassManagerBuilder};
+use inkwell::passes::PassManager;
 use inkwell::targets::{CodeModel, FileType, RelocMode, TargetTriple};
 use inkwell::targets::{InitializationConfig, Target, TargetMachine};
 use inkwell::types::BasicType;
-use inkwell::values::{BasicValue, BasicValueEnum, FunctionValue, InstructionOpcode};
+use inkwell::values::{AnyValue, BasicValue, BasicValueEnum, FunctionValue, InstructionOpcode};
 use inkwell::{AddressSpace, OptimizationLevel};
 
 use crate::hir::File;
@@ -36,6 +38,8 @@ pub fn codegen(hir: &hir::File) -> Result<(), ()> {
     if codegen.codegen_hir(&hir, &builder).is_err() {
         panic!("LLVM codegen failed");
     }
+
+    println!("LLVM version: {:?}", get_llvm_version());
 
     match codegen.module.verify() {
         Ok(_) => (),
@@ -75,7 +79,10 @@ pub struct CodegenContext<'a> {
     pub context: &'a Context,
     pub hir: &'a hir::File,
     pub module: Module<'a>,
-    //pub scopes: Scopes<HirId, BasicValueEnum<'a>>,
+    pub scopes: Scopes<HirId, BasicValueEnum<'a>>,
+    pub vars: Scopes<hir::VarId, BasicValueEnum<'a>>,
+    pub var_types: Scopes<hir::HirId, BasicTypeEnum<'a>>,
+    pub cur_func_data: Option<hir::AnalysisData>,
     pub cur_func: Option<FunctionValue<'a>>,
     pub struct_types: HashMap<HirId, StructType<'a>>,
 }
@@ -88,9 +95,12 @@ impl<'a> CodegenContext<'a> {
             context,
             module,
             hir,
-            // scopes: Scopes::new(),
+            scopes: Scopes::new(),
+            vars: Scopes::new(),
+            var_types: Scopes::new(),
             struct_types: HashMap::new(),
             cur_func: None,
+            cur_func_data: None,
         }
     }
 
@@ -139,16 +149,16 @@ impl<'a> CodegenContext<'a> {
     fn optimize(&self, optimization_argument: char) {
         let config = InitializationConfig::default();
         Target::initialize_native(&config).unwrap();
-        let pass_manager_builder = PassManagerBuilder::create();
+        //let pass_manager_builder = PassManagerBuilder::create();
 
         let optimization_level = to_optimization_level(optimization_argument);
         let size_level = to_size_level(optimization_argument);
-        pass_manager_builder.set_optimization_level(optimization_level);
-        pass_manager_builder.set_size_level(size_level);
+        //pass_manager_builder.set_optimization_level(optimization_level);
+        //pass_manager_builder.set_size_level(size_level);
 
-        let pass_manager = PassManager::create(());
-        pass_manager_builder.populate_module_pass_manager(&pass_manager);
-        pass_manager.run_on(&self.module);
+        //let pass_manager = PassManager::create(());
+        //pass_manager_builder.populate_module_pass_manager(&pass_manager);
+        //pass_manager.run_on(&self.module);
 
         // TODO: It seems this method was removed; re-evaluate if inlining is still done
         // Do LTO optimizations afterward mosty for function inlining
@@ -179,10 +189,12 @@ impl<'a> CodegenContext<'a> {
         fn_body: &'a hir::FnBody,
         builder: &'a Builder,
     ) -> Result<(), ()> {
-        let func = self.hir.get_fn(&fn_body.fn_id).unwrap();
+        let fn_decl = self.hir.get_fn(&fn_body.fn_id).unwrap();
+        let fn_analisis = self.hir.get_fn_analisis(&fn_body.fn_id);
 
-        if let Some(func) = self.module.get_function(&func.get_name()) {
+        if let Some(func) = self.module.get_function(&fn_decl.get_name()) {
             self.cur_func = Some(func);
+            self.cur_func_data = Some(fn_analisis.unwrap().clone());
 
             // let f_decl = self.hir.get_fn(&fn_body.fn_id).unwrap();
 
@@ -198,7 +210,7 @@ impl<'a> CodegenContext<'a> {
 
             builder.build_return(Some(&last));
         } else {
-            panic!("Cannot find function {:?}", func.get_name());
+            panic!("Cannot find function {:?}", fn_decl.get_name());
         }
 
         Ok(())
@@ -216,11 +228,24 @@ impl<'a> CodegenContext<'a> {
 
         builder.position_at_end(basic_block);
 
-        for stmt in body.stmts.iter() {
-            self.codegen_stmt(stmt, builder)?;
-        }
+        //for stmt in body.stmts.iter() {
+        //    self.codegen_stmt(stmt, builder)?;
+        //}
 
-        let return_expr = self.codegen_expression(body.expr.as_ref().unwrap(), builder)?;
+        let first_return_idx = body
+            .stmts
+            .iter()
+            .position(|s| s.is_return())
+            .unwrap_or(body.stmts.len());
+
+        let stmts = body.stmts.iter().take(first_return_idx + 1);
+
+        let stmt = stmts
+            .map(|stmt| self.codegen_stmt(stmt, builder))
+            .last()
+            .unwrap()?;
+
+        //let return_expr = self.codegen_expression(body.expr.as_ref().unwrap(), builder)?;
 
         //let first_return_idx = body
         //    .stmts
@@ -235,7 +260,7 @@ impl<'a> CodegenContext<'a> {
         //    .last()
         //    .unwrap()?;
 
-        Ok((return_expr, basic_block))
+        Ok((stmt, basic_block))
     }
 
     pub fn codegen_struct_field(
@@ -261,7 +286,9 @@ impl<'a> CodegenContext<'a> {
         }
 
         let f32_type = self.context.f32_type();
-        let struct_type = self.context.opaque_struct_type("struct");
+        let struct_type = self
+            .context
+            .opaque_struct_type(&format!("struct.{}", stru.name.name));
         struct_type.set_body(&field_types, false);
 
         self.struct_types.insert(stru.hir_id, struct_type);
@@ -274,8 +301,6 @@ impl<'a> CodegenContext<'a> {
         stmt: &'a hir::Statement,
         builder: &'a Builder,
     ) -> Result<BasicValueEnum<'a>, ()> {
-        println!("Processing stms: {:?}", stmt);
-
         Ok(match &*stmt.kind {
             hir::StatementKind::Let(l) => self.codegen_let(l, builder)?,
             hir::StatementKind::Expr(e) => self.codegen_expression(e, builder)?,
@@ -306,7 +331,7 @@ impl<'a> CodegenContext<'a> {
                             values.push(value)
                         }
 
-                        let val = llvm_struct_ty.const_named_struct(&values);
+                        //let val = llvm_struct_ty.const_named_struct(&values);
                         let struct_ptr =
                             builder.build_alloca(llvm_struct_ty, "struct_ptr").unwrap();
 
@@ -323,7 +348,7 @@ impl<'a> CodegenContext<'a> {
                             builder.build_store(inner_ptr, values[i]).unwrap();
                         }
 
-                        let val = struct_ptr.as_basic_value_enum();
+                        let val = struct_ptr.into();
                         val
                     }
                     _ => unreachable!(),
@@ -331,13 +356,10 @@ impl<'a> CodegenContext<'a> {
             }
             hir::ExprKind::Lit(ref lit) => self.codegen_literal(lit, builder)?,
             hir::ExprKind::Return(ref expr) => self.codegen_return(expr, builder)?,
+            hir::ExprKind::Call(ref call) => self.codegen_call(call, builder)?,
             hir::ExprKind::Block(_) => todo!(),
             hir::ExprKind::Dot(_) => todo!(),
-            hir::ExprKind::Call(_) => todo!(),
-            hir::ExprKind::Ident(ref ident) => {
-                println!("{:?}", ident);
-                self.context.bool_type().const_zero().into()
-            }
+            hir::ExprKind::Ident(ref ident) => self.codegen_identifier(ident, builder)?,
         })
     }
 
@@ -443,38 +465,53 @@ impl<'a> CodegenContext<'a> {
 
     fn codegen_let(
         &mut self,
-        l: &'a hir::LetBinding,
+        let_bind: &'a hir::LetBinding,
         builder: &'a Builder,
     ) -> Result<BasicValueEnum<'a>, ()> {
-        if let Some(ref expr) = l.expr {
-            let value = self.codegen_expression(expr, builder)?;
+        match let_bind.pattern {
+            hir::PatternKind::Ident(ref id) => {
+                let expr = let_bind.expr.as_ref().unwrap();
+                let value = self.codegen_expression(expr, builder)?;
 
-            // Allocate space for the variable
-            self.hir
-                .node_types
-                .get(&expr.hir_id)
-                .and_then(|t| {
-                    (t.is_primitive()/*&& !t.is_array() && !t.is_string()*/).then(|| {
-                        let ptr = builder
-                            .build_alloca(value.get_type(), format!("_{}", l.hir_id.0).as_str())
-                            .unwrap();
+                let current = self.cur_func_data.as_ref().unwrap();
+                let var_id = *current.map_vars.get(id.hir_id).unwrap();
 
-                        // TODO: self.scopes.add(id.get_hir_id(), ptr.as_basic_value_enum());
+                let existing_value = self.vars.get(var_id);
 
-                        ptr
+                let val = match existing_value {
+                    Some(val) => Some(val.into_pointer_value()),
+                    None => {
+                        // Allocate space for the variable
+                        let ty = &current.vars.get_var(var_id).ty;
+
+                        ty.is_primitive().then(|| {
+                            let ptr = builder
+                                .build_alloca(
+                                    value.get_type(),
+                                    format!("{}_ptr", id.name.to_string()).as_str(),
+                                )
+                                .unwrap();
+
+                            // self.scopes.add(id.hir_id, ptr.as_basic_value_enum());
+
+                            ptr
+                        })
+                    }
+                };
+
+                let val = val
+                    .map(|ptr| {
+                        builder.build_store(ptr, value);
+                        ptr.as_basic_value_enum()
                     })
-                })
-                .map(|ptr| {
-                    builder.build_store(ptr, value);
-                    ptr.as_basic_value_enum()
-                })
-                .or(Some(value))
-                .unwrap();
+                    .or(Some(value))
+                    .unwrap();
 
-            //let _ = builder.build_store(var_alloca, value).unwrap();
+                self.vars.add(var_id, val);
+                Ok(val)
+            }
+            _ => unreachable!(),
         }
-
-        Ok(self.context.bool_type().const_zero().into())
     }
 
     fn codegen_literal(
@@ -482,9 +519,11 @@ impl<'a> CodegenContext<'a> {
         lit: &hir::Literal,
         builder: &Builder,
     ) -> Result<BasicValueEnum<'a>, ()> {
+        let analysis = self.cur_func_data.as_ref().unwrap();
+
         Ok(match lit.kind {
             hir::LiteralKind::Int(_) => {
-                let value = *self.hir.int_literals.get(lit.hir_id).unwrap();
+                let value = *analysis.int_literals.get(lit.hir_id).unwrap();
                 let i64_type = self.context.i64_type();
                 i64_type.const_int(value.try_into().unwrap(), false).into()
             }
@@ -500,6 +539,64 @@ impl<'a> CodegenContext<'a> {
             hir::LiteralKind::String(_) => todo!(),
             hir::LiteralKind::Unit => todo!(),
         })
+    }
+
+    fn codegen_identifier(
+        &mut self,
+        id: &'a hir::Identifier,
+        builder: &'a Builder,
+    ) -> Result<BasicValueEnum<'a>, ()> {
+        let current = self.cur_func_data.as_ref().unwrap();
+        let ident_type = current.idents.get(id.hir_id).unwrap();
+
+        match ident_type {
+            hir::IdentType::Var(var_id) => {
+                let var = current.vars.get_var(*var_id);
+                let ty = &var.ty;
+
+                let llvm_val = match self.vars.get(*var_id) {
+                    None => {
+                        self.module.print_to_stderr();
+                        println!("err: {:#?} {:#?}", id, var_id);
+                        return Err(());
+                    }
+                    Some(val) => val,
+                };
+
+                // Dereference primitives only
+                let llvm_val = if llvm_val.is_pointer_value() && ty.is_primitive() {
+                    let llvm_pointee_ty = self.codegen_type(&ty.clone(), builder)?;
+                    let val = builder
+                        .build_load(
+                            llvm_pointee_ty,
+                            llvm_val.into_pointer_value(),
+                            &id.name.to_string(),
+                        )
+                        .unwrap()
+                        .as_basic_value_enum();
+
+                    val
+                } else {
+                    llvm_val
+                };
+
+                Ok(llvm_val)
+            }
+            _ => unreachable!(),
+        }
+
+        /*let val = match self.scopes.get(reso.clone()) {
+            None => {
+                self.module.print_to_stderr();
+                println!("gen: NO REO {:#?} {:#?}", id, reso);
+                return Err(());
+            }
+            Some(val) => val,
+        };*/
+    }
+
+    fn codegen_call(&self, call: &hir::FnCall, builder: &Builder) -> Result<BasicValueEnum<'a>, ()> {
+        Err(())   
     }
 }
 
@@ -617,16 +714,16 @@ impl<'g> Generator<'g> {
     fn optimize(&self, optimization_argument: char) {
         let config = InitializationConfig::default();
         Target::initialize_native(&config).unwrap();
-        let pass_manager_builder = PassManagerBuilder::create();
+        //let pass_manager_builder = PassManagerBuilder::create();
 
         let optimization_level = to_optimization_level(optimization_argument);
         let size_level = to_size_level(optimization_argument);
-        pass_manager_builder.set_optimization_level(optimization_level);
-        pass_manager_builder.set_size_level(size_level);
+        // pass_manager_builder.set_optimization_level(optimization_level);
+        // pass_manager_builder.set_size_level(size_level);
 
-        let pass_manager = PassManager::create(());
-        pass_manager_builder.populate_module_pass_manager(&pass_manager);
-        pass_manager.run_on(&self.module);
+        //let pass_manager = PassManager::create(());
+        //  pass_manager_builder.populate_module_pass_manager(&pass_manager);
+        //  pass_manager.run_on(&self.module);
 
         // TODO: It seems this method was removed; re-evaluate if inlining is still done
         // Do LTO optimizations afterward mosty for function inlining

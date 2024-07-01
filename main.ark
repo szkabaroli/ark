@@ -5,6 +5,7 @@ struct Test {
 fn main() -> Test {
     let a: Bool = false;
     let b = Test { a: a };
+    print(b);
     return b;
 }
 

@@ -21,6 +21,10 @@ pub trait Visitor: Sized {
         walk_struct_field(self, f);
     }
 
+    fn visit_field_value(&mut self, f: &FieldValue) {
+        walk_field_value(self, f);
+    }
+
     // fn visit_param(&mut self, p: &Param) {
     //     walk_param(self, p);
     // }
@@ -92,6 +96,12 @@ pub fn walk_struct<V: Visitor>(v: &mut V, s: &Struct) {
 pub fn walk_struct_field<V: Visitor>(v: &mut V, f: &StructField) {
     v.visit_type(&f.ty);
 }
+
+pub fn walk_field_value<V: Visitor>(v: &mut V, f: &FieldValue) {
+    v.visit_expr(&f.value);
+}
+
+
 
 //pub fn walk_flow<V: Visitor>(v: &mut V, f: &Flow) {
 //    for p in &f.params {
@@ -204,8 +214,12 @@ pub fn walk_expr<V: Visitor>(v: &mut V, e: &Expr) {
                 v.visit_expr(e);
             }
         }
+        ExprKind::Struct(ref s) => {
+            for f in &s.fields {
+                v.visit_field_value(f);
+            }
+        }
         ExprKind::Lit(_) => {}
-        ExprKind::Struct(_) => {}
         ExprKind::Ident(_) => {} //ExprKind::Error { .. } => {}
     }
 }

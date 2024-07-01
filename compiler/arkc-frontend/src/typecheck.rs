@@ -1,40 +1,41 @@
 mod expr;
 mod function;
-mod stmt;
 mod literals;
+mod stmt;
 
-use crate::Sema;
+use crate::sym::SymbolKind;
 use crate::{compilation::ModuleId, sym::ModuleSymTable};
+use crate::{report_sym_shadow_span, Sema};
 use arkc_hir::hir::NodeMap;
 use arkc_hir::{hir, ty};
 use function::VarManager;
 use std::collections::BTreeMap;
 
-pub use function::{TypeCheck, Var, NestedVarId};
+pub use function::TypeCheck;
 
 pub fn returns_value(statement: &hir::Statement) -> Result<(), ()> {
     match *statement.kind {
-        hir::StatementKind::Let(ref stmt) => Err(()),
+        hir::StatementKind::Let(_) => Err(()),
         hir::StatementKind::Expr(ref expr) => expr_returns_value(&expr),
     }
 }
 
-/*pub(super) fn add_local(
+pub(super) fn add_local(
     sa: &Sema,
     symtable: &mut ModuleSymTable,
     vars: &VarManager,
-    id: NestedVarId,
-    span: Span,
+    id: hir::NestedVarId,
 ) {
-    let name = vars.get_var(id).name;
+    let ident = &vars.get_var(id).name;
+    let name = sa.interner.intern(ident.name.as_str());
     let existing_symbol = symtable.insert(name, SymbolKind::Var(id));
 
     if let Some(existing_symbol) = existing_symbol {
         if !existing_symbol.kind().is_var() {
-            report_sym_shadow_span(sa, name, span, existing_symbol)
+            report_sym_shadow_span(sa, name, existing_symbol)
         }
     }
-}*/
+}
 
 pub fn expr_returns_value(expr: &hir::Expr) -> Result<(), ()> {
     match *expr.kind {
@@ -75,32 +76,41 @@ impl<'a> TypecheckingContext<'a> {
     }
 
     pub fn check_file(&mut self) {
-        let (mut types, ints) = {
+        let (mut types, mut analysis_map) = {
             let root = &self.sa.compilation.hir.borrow()[0];
             let mut types = BTreeMap::new();
-            let mut int_literals = NodeMap::new();
+            let mut analysis_map = NodeMap::new();
 
             for item in root.elements.iter() {
                 match &item.kind {
                     hir::ElemKind::Function(func) => {
+                        let mut analysis = hir::AnalysisData {
+                            idents: hir::NodeMap::new(),
+                            map_vars: hir::NodeMap::new(),
+                            int_literals: hir::NodeMap::new(),
+                            vars: hir::VarAccess::new(vec![]),
+                        };
+
                         let func_ty = root.node_types.get(&func.hir_id).expect("to be defined");
-                        self.check_fn_declaration(&mut int_literals, &mut types, func_ty, &func)
+                        self.check_fn_declaration(&mut analysis, &mut types, func_ty, &func);
+                        analysis_map.insert(func.hir_id, analysis);
                     }
                     _ => (),
                 }
             }
 
-            (types, int_literals)
+            (types, analysis_map)
         };
 
+        // Update hir::File with typechecking results
         let root = &mut self.sa.compilation.hir.borrow_mut()[0];
         root.node_types.append(&mut types);
-        root.int_literals.extend(ints);
+        root.func_analysis.extend(analysis_map)
     }
 
     fn check_fn_declaration(
         &mut self,
-        int_literals: &mut NodeMap<i64>,
+        analysis: &mut hir::AnalysisData,
         types: &mut BTreeMap<hir::HirId, ty::Type>,
         func_ty: &ty::Type,
         func: &hir::FnDeclaration,
@@ -119,7 +129,7 @@ impl<'a> TypecheckingContext<'a> {
             ctx: self,
             hir,
             types,
-            int_literals,
+            analysis,
             symtable: &mut symtable,
             param_types: vec![], // func.params_with_self().to_owned(),
             return_type: func_ty.output.clone(),

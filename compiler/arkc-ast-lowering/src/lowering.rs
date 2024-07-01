@@ -1,11 +1,7 @@
-use std::collections::BTreeMap;
-use std::sync::Arc;
-
-use parser::ast::{self, ElemData};
-
-use arkc_hir::hir::{self, BasicType, Block, ExprKind, HirId, NodeMap};
+use arkc_hir::hir::{self, NodeMap};
 use arkc_hir::hir_map::HirMap;
-use arkc_hir::ty;
+use parser::ast::{self, ElemData};
+use std::collections::BTreeMap;
 
 pub struct LoweringContext {
     hir_map: HirMap,
@@ -31,7 +27,7 @@ impl LoweringContext {
             //type_envs: Envs::default(),
             hir_map: Some(self.hir_map.clone()),
             bodies: self.bodies.clone(),
-            int_literals: NodeMap::new(),
+            func_analysis: NodeMap::new(),
             node_types: BTreeMap::new(),
             elements: self.elements.clone(),
         };
@@ -142,6 +138,7 @@ impl LoweringContext {
         hir::FnDeclaration {
             name: ident,
             mangled_name: None,
+            analysis: None,
             //arguments: f
             //    .arguments
             //    .iter()
@@ -177,18 +174,22 @@ impl LoweringContext {
                 hir_id: self.hir_map.next_hir_id(lit.id),
                 kind: Box::from(hir::ExprKind::Lit(self.lower_literal(lit))),
             },
+            ast::ExprKind::Call(call) => hir::Expr {
+                hir_id: self.hir_map.next_hir_id(call.id),
+                kind: Box::from(hir::ExprKind::Call(self.lower_call(call))),
+            },
             _ => unimplemented!(),
         }
     }
 
     fn lower_expr_struct(&mut self, stru: &ast::ExprStruct) -> hir::ExprStruct {
         let mut fields = Vec::new();
-        
+
         for field in stru.field_values.iter() {
             fields.push(hir::FieldValue {
                 hir_id: self.hir_map.next_hir_id(field.id),
                 name: self.lower_identifier(field.name.as_ref().unwrap()),
-                value: self.lower_expression(&field.value)
+                value: self.lower_expression(&field.value),
             })
         }
 
@@ -282,6 +283,14 @@ impl LoweringContext {
         hir::Literal {
             hir_id: self.hir_map.next_hir_id(lit.id),
             kind,
+        }
+    }
+    
+    fn lower_call(&mut self, call: &ast::Call) -> hir::FnCall {
+        hir::FnCall {
+            hir_id: self.hir_map.next_hir_id(call.id),
+            callee: self.lower_expression(&call.callee),
+            args: call.args.iter().map(|arg| self.lower_expression(&arg),).collect(),
         }
     }
 }

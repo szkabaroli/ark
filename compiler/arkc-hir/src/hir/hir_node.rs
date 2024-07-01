@@ -22,8 +22,8 @@ impl<V: Clone> NodeMap<V> {
         }
     }
 
-    pub fn extend(&mut self, rhs: NodeMap<V>){
-         self.map.extend(rhs.map);
+    pub fn extend(&mut self, rhs: NodeMap<V>) {
+        self.map.extend(rhs.map);
     }
 
     pub fn get(&self, id: HirId) -> Option<&V> {
@@ -36,12 +36,61 @@ impl<V: Clone> NodeMap<V> {
     }
 }
 
+#[derive(Debug, PartialEq, Eq, Copy, Clone, Hash, Serialize, Deserialize)]
+pub struct NestedVarId(pub usize);
+
+#[derive(Debug, PartialEq, Eq, Copy, Clone, Hash, Serialize, Deserialize)]
+pub struct VarId(pub usize);
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub enum IdentType {
+    /// Name of local variable.
+    Var(VarId),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Var {
+    pub ty: Type,
+    // pub location: VarLocation,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VarAccess {
+    vars: Vec<Var>,
+}
+
+impl VarAccess {
+    pub fn new(vars: Vec<Var>) -> VarAccess {
+        VarAccess { vars }
+    }
+
+    fn empty() -> VarAccess {
+        VarAccess { vars: Vec::new() }
+    }
+
+    pub fn get_var(&self, id: VarId) -> &Var {
+        &self.vars[id.0]
+    }
+
+    pub fn get_self(&self) -> &Var {
+        &self.vars[0]
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnalysisData {
+    pub idents: NodeMap<IdentType>,
+    pub map_vars: NodeMap<VarId>,
+    pub int_literals: NodeMap<i64>,
+    pub vars: VarAccess,
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct File {
     #[serde(skip)]
     pub hir_map: Option<HirMap>,
     pub node_types: BTreeMap<HirId, Type>,
-    pub int_literals: NodeMap<i64>,
+    pub func_analysis: NodeMap<AnalysisData>,
     pub bodies: BTreeMap<FnBodyId, FnBody>,
     pub elements: Vec<Elem>,
 }
@@ -49,6 +98,10 @@ pub struct File {
 impl File {
     pub fn get_body(&self, body_id: &FnBodyId) -> Option<&FnBody> {
         self.bodies.get(body_id)
+    }
+
+    pub fn get_fn_analisis(&self, hir_id: &HirId) -> Option<&AnalysisData> {
+        self.func_analysis.get(*hir_id)
     }
 
     pub fn get_fn(&self, hir_id: &HirId) -> Option<&FnDeclaration> {
@@ -152,6 +205,7 @@ impl std::ops::Deref for Identifier {
 pub struct FnDeclaration {
     pub name: Option<Identifier>,
     pub mangled_name: Option<Identifier>,
+    pub analysis: Option<AnalysisData>,
     //pub arguments: Vec<ArgumentDecl>,
     pub body_id: FnBodyId,
     pub hir_id: HirId,
@@ -295,7 +349,7 @@ impl Expr {
 pub struct FieldValue {
     pub hir_id: HirId,
     pub name: Identifier,
-    pub value: Expr
+    pub value: Expr,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -326,9 +380,8 @@ pub struct Dot {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FnCall {
     pub hir_id: HirId,
-    pub op: Expr,
-    pub args: Vec<Expr>,
-    pub ty: Option<Type>,
+    pub callee: Expr,
+    pub args: Vec<Expr>
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

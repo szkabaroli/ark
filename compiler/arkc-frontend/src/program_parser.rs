@@ -28,7 +28,7 @@ impl<'a> ProgramParser<'a> {
         }
     }
 
-    pub fn parse_all(&mut self) -> (Vec<Arc<ast::File>>) {
+    pub fn parse_all(&mut self) -> Vec<Arc<ast::File>> {
         // self.prepare_packages();
 
         // self.add_stdlib_package();

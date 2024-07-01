@@ -2,7 +2,7 @@ use arkc_hir::{hir, ty};
 
 use crate::error::ErrorMessage;
 
-use super::{expr::check_expr, TypeCheck};
+use super::{add_local, expr::check_expr, TypeCheck};
 
 pub(super) fn check_stmt(ck: &mut TypeCheck, s: &hir::Statement) {
     match *s.kind {
@@ -66,13 +66,13 @@ fn check_stmt_let(ck: &mut TypeCheck, binding: &hir::LetBinding) {
 pub(super) fn check_let_pattern(ck: &mut TypeCheck, pattern: &hir::PatternKind, ty: ty::Type) {
     match pattern {
         hir::PatternKind::Ident(ref ident) => {
-            let name = ck.sa.interner.intern(&ident.name);
-            //let var_id = ck.vars.add_var(name, ty, ident.mutable);
+            // let name = ck.sa.interner.intern(&ident.name);
+            let var_id = ck.vars.add_var(ident.clone(), ty, true);
 
-            //add_local(ck.sa, ck.symtable, ck.vars, var_id, ck.file_id, ident.span);
-            //ck.analysis
-            //    .map_vars
-            //    .insert(ident.id, ck.vars.local_var_id(var_id));
+            add_local(ck.sa, ck.symtable, ck.vars, var_id);
+            ck.analysis
+                .map_vars
+                .insert(ident.hir_id, ck.vars.local_var_id(var_id));
         }
     }
 }

@@ -24,20 +24,25 @@ use super::returns_value;
 use super::stmt::check_stmt;
 use super::TypecheckingContext;
 
-#[derive(Debug, PartialEq, Eq, Copy, Clone, Hash, Serialize, Deserialize)]
-pub struct NestedVarId(pub usize);
+#[derive(Debug)]
+struct VarAccessPerFunction {
+    id: usize,
+    //start_scope_id: usize,
+    start_var_id: usize,
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Var {
-    pub id: NestedVarId,
+    pub id: hir::NestedVarId,
     pub name: hir::Identifier,
     pub ty: ty::Type,
     pub mutable: bool,
     //pub location: VarLocation,
     //pub scope_id: NestedScopeId,
-    pub function_id: HirId,
+    pub function_id: usize,
 }
 
+#[derive(Debug)]
 pub struct VarManager {
     // Stack of variables of all nested functions.
     vars: Vec<Var>,
@@ -46,39 +51,84 @@ pub struct VarManager {
     // scopes: Vec<VarAccessPerScope>,
 
     // Start of functions.
-    // functions: Vec<VarAccessPerFunction>,
+    functions: Vec<VarAccessPerFunction>,
 }
 
 impl VarManager {
-    pub fn new() -> Self {
-        Self { vars: vec![] }
+    fn enter_function_scope(&mut self) {
+        /*let scope_id = self.scopes.len();
+
+        self.scopes.push(VarAccessPerScope {
+            id: NestedScopeId(scope_id),
+            next_field_id: 0,
+            vars: Vec::new(),
+        });*/
+        self.functions.push(VarAccessPerFunction {
+            id: self.functions.len(),
+            //start_scope_id: scope_id,
+            start_var_id: self.vars.len(),
+        });
     }
 
-    pub(super) fn get_var(&self, idx: NestedVarId) -> &Var {
+    pub fn new() -> Self {
+        Self { vars: vec![], functions: vec![] }
+    }
+
+    pub fn get_var(&self, idx: hir::NestedVarId) -> &Var {
         &self.vars[idx.0]
     }
-}
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum VarLocation {
-    Stack,
-    // TODO: closures Context(ScopeId, ContextFieldId),
-}
+    pub fn add_var(
+        &mut self,
+        name: hir::Identifier,
+        ty: ty::Type,
+        mutable: bool,
+    ) -> hir::NestedVarId {
+        let id = hir::NestedVarId(self.vars.len());
 
-pub(super) fn add_local(
-    sa: &Sema,
-    symtable: &mut ModuleSymTable,
-    vars: &VarManager,
-    id: NestedVarId,
-) {
-    let name = &vars.get_var(id).name;
-    //let existing_symbol = symtable.insert(name.name, SymbolKind::Var(id));
+        let var = Var {
+            id,
+            name,
+            ty,
+            mutable,
+            //location: VarLocation::Stack,
+            //scope_id: self.current_scope().id,
+            function_id: self.current_function().id,
+        };
 
-    //if let Some(existing_symbol) = existing_symbol {
-    //    if !existing_symbol.kind().is_var() {
-    //        report_sym_shadow_span(sa, name, existing_symbol)
-    //    }
-    //}
+        self.vars.push(var);
+        //self.current_scope_mut().vars.push(id);
+
+        id
+    }
+
+    fn current_function(&self) -> &VarAccessPerFunction {
+        self.functions.last().expect("missing function")
+    }
+
+    fn leave_function_scope(&mut self) -> Vec<Var> {
+        //let _ = self.scopes.pop().expect("missing scope");
+        let function = self.functions.pop().expect("missing function");
+
+        self.vars.drain(function.start_var_id..).collect()
+    }
+
+    pub(super) fn local_var_id(&self, var_id: hir::NestedVarId) -> hir::VarId {
+        assert!(var_id.0 >= self.current_function().start_var_id);
+        hir::VarId(var_id.0 - self.current_function().start_var_id)
+    }
+
+    pub(super) fn maybe_allocate_in_context(&mut self, var_id: hir::NestedVarId) -> hir::IdentType {
+        hir::IdentType::Var(self.local_var_id(var_id))
+
+        //if var_id.0 < self.current_function().start_var_id {
+        //let field_id = self.ensure_context_allocated(var_id);
+        //let NestedScopeId(level) = self.scope_for_var(var_id).id;
+        //IdentType::Context(OuterContextIdx(level), field_id)
+        //} else {
+        //    IdentType::Var(self.local_var_id(var_id))
+        //}
+    }
 }
 
 pub struct TypeCheck<'a> {
@@ -86,25 +136,50 @@ pub struct TypeCheck<'a> {
     pub hir: &'a hir::File,
     pub ctx: &'a TypecheckingContext<'a>,
     pub symtable: &'a mut ModuleSymTable,
-    pub int_literals: &'a mut NodeMap<i64>,
-    pub types: &'a mut BTreeMap<hir::HirId, ty::Type>,
     pub vars: &'a mut VarManager,
+    pub analysis: &'a mut hir::AnalysisData,
+    pub types: &'a mut BTreeMap<hir::HirId, ty::Type>,
     pub param_types: Vec<ty::Type>,
     pub return_type: Option<Box<ty::Type>>,
 }
 
 impl<'a> TypeCheck<'a> {
     pub fn check_function(&mut self, func: &hir::FnDeclaration) {
-        let root = &self.sa.compilation.hir.borrow()[0];
-        let start_level = self.symtable.levels();
+        let file = self.sa.compilation.hir.borrow();
+        let body = file[0].get_body(&func.body_id).expect("missing block");
 
+        let start_level = self.symtable.levels();
+        self.enter_function_scope();
         self.symtable.push_level();
 
         //self.add_params(func);
-        self.check_body(root.get_body(&func.body_id).expect("missing block"));
+        self.check_body(body);
 
         self.symtable.pop_level();
         assert_eq!(self.symtable.levels(), start_level);
+
+        self.leave_function_scope();
+    }
+
+    fn enter_function_scope(&mut self) {
+        //self.start_context_id = self.context_classes.len();
+        //self.context_classes.push(LazyContextData::new());
+        self.vars.enter_function_scope();
+    }
+
+    fn leave_function_scope(&mut self) {
+        // Store var definitions for all local and context vars defined in this function.
+        let vars = self.vars.leave_function_scope();
+
+        let vars = vars
+            .into_iter()
+            .map(|vd| hir::Var {
+                ty: vd.ty.clone(),
+                //location: vd.location,
+            })
+            .collect();
+
+        self.analysis.vars = hir::VarAccess::new(vars);
     }
 
     fn check_body(&mut self, func_body: &hir::FnBody) {
@@ -170,6 +245,31 @@ impl<'a> TypeCheck<'a> {
             None, // self.self_ty.clone(),
             AliasReplacement::ReplaceWithActualType,
         )
+    }
+
+    pub(super) fn maybe_allocate_in_context(&mut self, var_id: hir::NestedVarId) -> hir::IdentType {
+        let ident_type = self.vars.maybe_allocate_in_context(var_id);
+
+        match ident_type {
+            /*IdentType::Context(context_id, _field_id) => {
+                // We need parent slots from the context of the variable up to (not including)
+                // the first context of this function.
+                // There is no need for parent slots for contexts within this function because
+                // we can always load that context out of the lambda object which is passed as
+                // the first argument.
+                let indices = context_id.0 + 1..self.start_context_id;
+                let range = &self.context_classes[indices];
+                for context_class in range {
+                    context_class.require_parent_slot();
+                }
+                // This lambda needs the caller context.
+                assert!(self.is_lambda);
+                self.needs_context_slot_in_lambda_object = true;
+                ident_type
+            }*/
+            hir::IdentType::Var(..) => ident_type,
+            _ => unreachable!(),
+        }
     }
 
     pub(super) fn ty_name(&self, ty: &ty::Type) -> String {

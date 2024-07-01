@@ -5,7 +5,7 @@ name = "arkc-codegen-llvm"
 version = "0.0.2"
 
 [dependencies]
-inkwell = { version="0.4", features = ["llvm16-0", "llvm16-0-prefer-dynamic"]}
+inkwell = { version="0.4", features = ["llvm17-0", "llvm17-0-prefer-dynamic"]}
 parser={path = "../arkc-parser"}
 arkc-hir={path = "../arkc-hir"}
 arkc-frontend={path = "../arkc-frontend"}
