@@ -5,6 +5,14 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Launch Chrome",
+            "request": "launch",
+            "type": "chrome",
+            "runtimeArgs": ["--allow-file-access-from-files"],
+            "url": "file:///C:/Users/Roland/Documents/Code/ark/debug.html",
+            "webRoot": "${workspaceFolder}"
+        },
+        {
             "type": "lldb",
             "request": "launch",
             "name": "Debug executable 'ark-language-server'",

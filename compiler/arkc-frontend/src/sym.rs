@@ -21,7 +21,6 @@ impl ModuleSymTable {
     pub fn new(sa: &Sema, module_id: ModuleId) -> ModuleSymTable {
         let module = sa.compilation.module(module_id);
         let outer = module.table();
-        print!("outer {:?}", outer);
         // let dependencies = sa.compilation.modules[module_id].table.clone();
         // let prelude = sa.module(sa.prelude_module_id()).table();
 

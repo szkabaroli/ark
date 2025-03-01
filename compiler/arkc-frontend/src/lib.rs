@@ -46,7 +46,7 @@ pub fn check_program(sa: &mut Sema) -> bool {
 
     return_on_error!(sa);
 
-    let mut hir: Vec<hir::File> = ast.iter().map(|file| lower_file(file)).collect();
+    let hir: Vec<hir::File> = ast.iter().map(|file| lower_file(file)).collect();
     sa.compilation.ast.set(ast).unwrap();
 
     let module_id = sa.compilation.program_module_id();

@@ -268,7 +268,6 @@ impl<'a> CodegenContext<'a> {
         field: &'a hir::StructField,
         builder: &'a Builder,
     ) -> Result<BasicTypeEnum<'a>, ()> {
-        println!("{:#?}", self.hir);
         let field_type = self.hir.node_types.get(&field.hir_id).unwrap();
         self.codegen_type(field_type, builder)
     }

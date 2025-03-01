@@ -1,9 +1,7 @@
-use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt;
 use std::path::PathBuf;
 
-use parser::SourceFileId;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -17,7 +15,7 @@ use super::HirId;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct FileInfo {
-    path: PathBuf
+    path: PathBuf,
 }
 
 #[derive(Clone, Copy, Eq, Hash, PartialEq, PartialOrd, Ord, Deserialize, Serialize)]

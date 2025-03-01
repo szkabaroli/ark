@@ -9,12 +9,16 @@ pub trait Visitor: Sized {
         walk_fct(self, &f);
     }
 
-    fn visit_flow(&mut self, f: &Arc<Flow>) {
+    fn visit_flow(&mut self, f: &Arc<FlowItem>) {
         walk_flow(self, &f);
     }
 
     fn visit_struct(&mut self, s: &Arc<StructItem>) {
         walk_struct(self, s);
+    }
+
+    fn visit_global(&mut self, s: &Arc<GlobalItem>) {
+        walk_global(self, s);
     }
 
     fn visit_struct_field(&mut self, f: &StructField) {
@@ -40,6 +44,10 @@ pub trait Visitor: Sized {
     fn visit_import(&mut self, i: &Arc<Import>) {
         walk_import(self, i);
     }
+
+    fn visit_interface(&mut self, i: &Arc<InterfaceItem>) {
+        walk_interface(self, i);
+    }
 }
 
 pub fn walk_file<V: Visitor>(v: &mut V, f: &File) {
@@ -52,11 +60,12 @@ pub fn walk_elem<V: Visitor>(v: &mut V, e: &ElemData) {
     match e {
         ElemData::Function(f) => v.visit_fct(f),
         ElemData::Flow(f) => v.visit_flow(f),
+        ElemData::Interface(i) => v.visit_interface(i),
         //ElemData::Class(ref c) => v.visit_class(c),
         ElemData::Struct(ref s) => v.visit_struct(s),
         //ElemData::Trait(ref t) => v.visit_trait(t),
         //ElemData::Impl(ref i) => v.visit_impl(i),
-        //ElemData::Global(ref g) => v.visit_global(g),
+        ElemData::Global(ref g) => v.visit_global(g),
         // ElemData::Const(ref c) => todo!(),
         //ElemData::Enum(ref e) => v.visit_enum(e),
         //ElemData::Alias(ref e) => v.visit_alias(e),
@@ -88,11 +97,19 @@ pub fn walk_struct<V: Visitor>(v: &mut V, s: &StructItem) {
     }
 }
 
+pub fn walk_interface<V: Visitor>(v: &mut V, s: &InterfaceItem) {
+    // nothing to do (yet)
+}
+
+pub fn walk_global<V: Visitor>(v: &mut V, s: &GlobalItem) {
+    // nothing to do (yet)
+}
+
 pub fn walk_struct_field<V: Visitor>(v: &mut V, f: &StructField) {
     v.visit_type(&f.ty);
 }
 
-pub fn walk_flow<V: Visitor>(v: &mut V, f: &Flow) {
+pub fn walk_flow<V: Visitor>(v: &mut V, f: &FlowItem) {
     for p in &f.params {
         v.visit_param(p);
     }

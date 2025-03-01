@@ -53,8 +53,6 @@ impl<'a> SymbolResolver<'a> {
             module_table
         };
 
-        println!("{:#?}", module_table);
-
         assert!(self
             .module_symtables
             .insert(module_id, module_table)

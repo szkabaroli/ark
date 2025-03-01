@@ -31,7 +31,7 @@ impl File {
     }
 
     #[cfg(test)]
-    pub fn flow(&self, index: usize) -> &Flow {
+    pub fn flow(&self, index: usize) -> &FlowItem {
         self.elements[index].to_flow().unwrap()
     }
 }
@@ -201,9 +201,11 @@ pub type Elem = Arc<ElemData>;
 
 #[derive(Clone, Debug)]
 pub enum ElemData {
+    Global(Arc<GlobalItem>),
     Function(Arc<FnItem>),
-    Flow(Arc<Flow>),
+    Flow(Arc<FlowItem>),
     Struct(Arc<StructItem>),
+    Interface(Arc<InterfaceItem>),
     Import(Arc<Import>),
     Error { id: NodeId, span: Span },
 }
@@ -211,6 +213,8 @@ pub enum ElemData {
 impl ElemData {
     pub fn span(&self) -> Span {
         match self {
+            ElemData::Global(ref node) => node.span,
+            ElemData::Interface(ref node) => node.span,
             ElemData::Function(ref node) => node.span,
             ElemData::Struct(ref node) => node.span,
             ElemData::Flow(ref node) => node.span,
@@ -226,7 +230,7 @@ impl ElemData {
         }
     }
 
-    pub fn to_flow(&self) -> Option<&Flow> {
+    pub fn to_flow(&self) -> Option<&FlowItem> {
         match self {
             &ElemData::Flow(ref flow) => Some(flow),
             _ => None,
@@ -348,7 +352,7 @@ pub struct FlowExprParenType {
 }
 
 #[derive(Clone, Debug)]
-pub struct Flow {
+pub struct FlowItem {
     pub id: NodeId,
     pub declaration_span: Span,
     pub span: Span,
@@ -393,6 +397,22 @@ pub struct StructItem {
     pub name: Option<Ident>,
     pub green: GreenNode,
     pub fields: Vec<StructField>,
+}
+
+#[derive(Clone, Debug)]
+pub struct InterfaceItem {
+    pub id: NodeId,
+    pub span: Span,
+    pub name: Option<Ident>,
+    pub green: GreenNode
+}
+
+#[derive(Clone, Debug)]
+pub struct GlobalItem {
+    pub id: NodeId,
+    pub span: Span,
+    pub name: Option<Ident>,
+    pub green: GreenNode
 }
 
 #[derive(Clone, Debug)]
@@ -450,7 +470,7 @@ impl StmtData {
             span,
             pattern,
             data_type,
-            expr
+            expr,
         })
     }
 
@@ -587,7 +607,7 @@ pub struct ExprStruct {
     pub id: NodeId,
     pub span: Span,
     pub name: Expr,
-    pub field_values: Vec<FieldValue>
+    pub field_values: Vec<FieldValue>,
 }
 
 #[derive(Clone, Debug)]

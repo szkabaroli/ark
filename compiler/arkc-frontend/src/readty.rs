@@ -112,7 +112,6 @@ fn read_type_path(
         Ok(sym)
     } else {
         let name = &names.last().cloned().unwrap().name;
-        println!("{:?}", table.get_string(sa, name));
         Ok(table.get_string(sa, name))
     }
 }

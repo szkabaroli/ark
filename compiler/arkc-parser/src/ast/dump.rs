@@ -50,13 +50,14 @@ impl AstDumper {
     fn dump_elem(&mut self, el: &ElemData) {
         match *el {
             ElemData::Function(ref node) => self.dump_function(node),
+            ElemData::Interface(ref node) => self.dump_interface(node),
+            ElemData::Flow(_) => dump!(self, "todo"),
             ElemData::Import(ref node) => self.dump_import(node),
             ElemData::Struct(ref node) => self.dump_struct(node),
-            ElemData::Flow(_) => dump!(self, "todo"),
             //ElemData::Class(ref node) => self.dump_class(node),
             //ElemData::Trait(ref node) => self.dump_trait(node),
             //ElemData::Impl(ref node) => self.dump_impl(node),
-            //ElemData::Global(ref node) => self.dump_global(node),
+            ElemData::Global(ref node) => self.dump_global(node),
             //ElemData::Const(ref node) => self.dump_const(node),
             //ElemData::Enum(ref node) => self.dump_enum(node),
             //ElemData::Alias(ref node) => self.dump_alias(node),
@@ -69,20 +70,20 @@ impl AstDumper {
         }
     }
 
-    /*fn dump_global(&mut self, global: &Global) {
+    fn dump_global(&mut self, global: &GlobalItem) {
         dump!(self, "global @ {} {}", global.span, global.id);
         self.dump_ident(&global.name);
 
-        self.indent(|d| {
-            d.dump_type(&global.data_type);
+        //self.indent(|d| {
+        //    d.dump_type(&global.data_type);
 
-            if let Some(ref initial_value) = global.initial_value {
-                d.dump_expr(initial_value);
-            } else {
-                dump!(d, "<no expr given>");
-            }
-        });
-    }*/
+        //    if let Some(ref initial_value) = global.initial_value {
+        //        d.dump_expr(initial_value);
+        //     } else {
+        //        dump!(d, "<no expr given>");
+        //    }
+        //});
+    }
 
     /*fn dump_extern(&mut self, stmt: &ExternPackage) {
         dump!(self, "extern package @ {} {}", stmt.span, stmt.id);
@@ -222,6 +223,11 @@ impl AstDumper {
         self.indent(|d| d.dump_type(&field.data_type));
     }*/
 
+    fn dump_interface(&mut self, interface: &InterfaceItem) {
+        dump!(self, "interface @ {} {}", interface.span, interface.id);
+        self.dump_ident(&interface.name);
+    }
+
     fn dump_function(&mut self, fct: &FnItem) {
         dump!(self, "function @ {} {}", fct.span, fct.id);
         self.dump_ident(&fct.name);
@@ -262,7 +268,7 @@ impl AstDumper {
     }
 
     fn dump_type(&mut self, ty: &TypeData) {
-        dump!(self, "type @ {:?} {}", ty.span(), ty.id());
+        dump!(self, "type @ {} {}", ty.span(), ty.id());
     }
 
     fn dump_stmt(&mut self, stmt: &StmtData) {

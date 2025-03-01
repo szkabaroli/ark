@@ -57,6 +57,8 @@ impl LoweringContext {
                 self.elements.push(elem);
             }
             ElemData::Flow(_) => todo!(),
+            ElemData::Global(_) => todo!(),
+            ElemData::Interface(_) => todo!(),
             ElemData::Import(_) => todo!(),
             ElemData::Error { .. } => panic!("unexpected ast error"),
         }
@@ -96,7 +98,7 @@ impl LoweringContext {
         }
 
         let is_internal = match ident.name.as_str() {
-            "Int32" | "Bool" | "Char" | "Int64" | "Float64" => true,
+            "int32" | "bool" | "char" | "int64" | "float64" => true,
             _ => false,
         };
 

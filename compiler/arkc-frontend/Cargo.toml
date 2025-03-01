@@ -9,7 +9,6 @@ id-arena = "*"
 parking_lot="*"
 parser = {path = "../arkc-parser"}
 arkc-hir = {path = "../arkc-hir"}
-arkc-infer = {path = "../arkc-infer"}
 arkc-ast-lowering = {path = "../arkc-ast-lowering"}
 serde="1.0"
 bincode={version = "2.0.0-rc.3"}

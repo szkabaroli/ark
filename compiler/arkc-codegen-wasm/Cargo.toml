@@ -1,11 +1,14 @@
 [package]
 authors = []
 edition = "2021"
-name = "arkc-infer"
+name = "arkc-codegen-wasm"
 version = "0.0.2"
 
 [dependencies]
+arkc-frontend = {path = "../arkc-frontend"}
 arkc-hir = {path = "../arkc-hir"}
+parser = {path = "../arkc-parser"}
+wasm-encoder = {version = "0.226.0"}
 
 [profile.release]
 lto = true

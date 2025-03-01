@@ -1,6 +1,0 @@
-[package]
-name = "ark-rt"
-version = "0.0.2"
-edition = "2021"
-
-[dependencies]

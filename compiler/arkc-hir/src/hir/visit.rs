@@ -63,7 +63,7 @@ pub fn walk_elem<V: Visitor>(v: &mut V, e: &Elem) {
         //ElemData::Trait(ref t) => v.visit_trait(t),
         //ElemData::Impl(ref i) => v.visit_impl(i),
         //ElemData::Global(ref g) => v.visit_global(g),
-        // ElemData::Const(ref c) => todo!(),
+        //ElemData::Const(ref c) => todo!(),
         //ElemData::Enum(ref e) => v.visit_enum(e),
         //ElemData::Alias(ref e) => v.visit_alias(e),
         //ElemData::Module(ref e) => v.visit_module(e),

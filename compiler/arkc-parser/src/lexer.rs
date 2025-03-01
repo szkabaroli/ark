@@ -522,7 +522,7 @@ fn is_operator(ch: Option<char>) -> bool {
 
 fn is_identifier_start(ch: Option<char>) -> bool {
     match ch {
-        Some(ch) => (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_',
+        Some(ch) => (ch >= 'a' && ch <= 'z') || ch == '_',
         _ => false,
     }
 }

@@ -9,7 +9,8 @@ use crate::{
     lex,
     source_file::{SourceFile, SourceFileId},
     token::{
-        TokenSet, ELEM_FIRST, EMPTY, EXPRESSION_FIRST, FIELD_FIRST, FIELD_VALUE_FIRST, FLOW_EXPRESSION_FIRST, IMPORT_PATH_ATOM_FIRST, MODIFIER_FIRST, PARAM_LIST_RS
+        TokenSet, ELEM_FIRST, EMPTY, EXPRESSION_FIRST, FIELD_FIRST, FIELD_VALUE_FIRST,
+        FLOW_EXPRESSION_FIRST, IMPORT_PATH_ATOM_FIRST, MODIFIER_FIRST, PARAM_LIST_RS,
     },
     NodeId, ParseError, ParseErrorWithLocation, Span,
     TokenKind::{self, *},
@@ -23,6 +24,11 @@ enum StmtOrExpr {
 enum FlowStmtOrExpr {
     Stmt(ast::FlowStmt),
     Expr(ast::FlowExpr),
+}
+
+enum FunctionOrStmt {
+    Func(ast::FnItem),
+    Expr(ast::Const),
 }
 
 pub struct NodeIdGenerator(AtomicUsize);
@@ -169,20 +175,20 @@ impl Parser {
                 let fct = self.parse_function(None);
                 Arc::new(ElemData::Function(fct))
             }
-
             FLOW_KW => {
                 let flow = self.parse_flow(None);
                 Arc::new(ElemData::Flow(flow))
             }
+            STRUCT_KW => {
+                let struc = self.parse_struct();
+                Arc::new(ElemData::Struct(struc))
+            }
+            IDENTIFIER => Arc::new(self.parse_function_or_global()),
 
             /*CLASS_KW => {
                 let class = self.parse_class(modifiers);
                 Arc::new(ElemData::Class(class))
             }*/
-            STRUCT_KW => {
-                let struc = self.parse_struct();
-                Arc::new(ElemData::Struct(struc))
-            }
 
             /*TRAIT_KW => {
                 let trait_ = self.parse_trait(modifiers);
@@ -520,7 +526,7 @@ impl Parser {
         })
     }
 
-    fn parse_flow(&mut self, modifiers: Option<ModifierList>) -> Arc<ast::Flow> {
+    fn parse_flow(&mut self, modifiers: Option<ModifierList>) -> Arc<ast::FlowItem> {
         let start = self.current_span().start();
         self.start_node();
         self.assert(FLOW_KW);
@@ -533,7 +539,7 @@ impl Parser {
 
         let green = self.builder.finish_node(FLOW);
 
-        Arc::new(ast::Flow {
+        Arc::new(ast::FlowItem {
             id: self.new_node_id(),
             name,
             declaration_span,
@@ -543,6 +549,45 @@ impl Parser {
             block,
             green,
         })
+    }
+
+    fn parse_function_or_global(&mut self) -> ElemData {
+        let start = self.current_span().start();
+        self.start_node();
+
+        let name = self.expect_identifier();
+        self.skip_trivia();
+        self.expect(COLON);
+        self.skip_trivia();
+
+        if self.is(FN_KW) {
+            self.eat(FN_KW);
+            let params = self.parse_function_params();
+            let return_type = self.parse_function_type();
+            let declaration_span = self.span_from(start);
+            let body = self.parse_function_body();
+
+            let green = self.builder.finish_node(FN);
+            
+            ElemData::Function(Arc::new(ast::FnItem {
+                id: self.new_node_id(),
+                green,
+                name,
+                declaration_span,
+                span: self.finish_node(),
+                signature: ast::FnSignature {
+                    inputs: params,
+                    output: return_type,
+                    span: declaration_span,
+                },
+                body,
+            }))
+        } else {
+            ElemData::Error {
+                id: self.new_node_id(),
+                span: self.finish_node(),
+            }
+        }
     }
 
     fn parse_function(&mut self, modifiers: Option<ModifierList>) -> Arc<ast::FnItem> {
@@ -1051,7 +1096,6 @@ impl Parser {
             }
 
             let kind = self.current();
-            
 
             left = match kind {
                 L_BRACE => self.parse_lit_struct(start, marker.clone(), left),
@@ -1245,8 +1289,7 @@ impl Parser {
             Vec::new()
         };
 
-        self.builder
-            .finish_node_starting_at(STRUCT, marker.clone());
+        self.builder.finish_node_starting_at(STRUCT, marker.clone());
 
         Arc::new(ExprKind::Struct(ExprStruct {
             id: self.new_node_id(),

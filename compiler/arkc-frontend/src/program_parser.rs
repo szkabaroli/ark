@@ -7,16 +7,14 @@ use std::sync::Arc;
 use crate::compilation::{Module, ModuleId, ModuleName};
 use crate::error::msg::ErrorMessage;
 use crate::sema::Sema;
-use crate::sym::SymTable;
 
-use parser::ast;
+use parser::{ast, ast::dump::dump_file};
 use parser::parser::NodeIdGenerator;
 use parser::{Parser, SourceFile, SourceFileId, Span};
 
 pub struct ProgramParser<'a> {
     sa: &'a mut Sema,
     files_to_parse: VecDeque<SourceFileId>,
-    packages: HashMap<String, Vec<PathBuf>>,
 }
 
 impl<'a> ProgramParser<'a> {
@@ -24,7 +22,6 @@ impl<'a> ProgramParser<'a> {
         ProgramParser {
             sa,
             files_to_parse: VecDeque::new(),
-            packages: HashMap::new(),
         }
     }
 
@@ -42,6 +39,7 @@ impl<'a> ProgramParser<'a> {
         while let Some(file_id) = self.files_to_parse.pop_front() {
             let file = self.sa.compilation.file(file_id);
             let ast = self.parse_file(id_gen.clone(), file);
+            dump_file(&ast);
             asts.push(ast);
         }
 

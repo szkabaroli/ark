@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WASM Debugging</title>
+</head>
+<body>
+    <h1>WebAssembly Debugging</h1>
+    <button id="loadWASM">Load WASM</button>
+    <div id="output"></div>
+
+    <script>
+        document.getElementById('loadWASM').addEventListener('click', async () => {
+            try {
+                // Load the WASM file (ensure it's in the same directory or provide the correct path)
+                const response = await fetch('file:///C:/Users/Roland/Documents/Code/ark/test.wasm');
+                const wasmArrayBuffer = await response.arrayBuffer();
+                
+                // Compile the WASM module
+                const wasmModule = await WebAssembly.compile(wasmArrayBuffer);
+                
+                // Instantiate the WASM module
+                const wasmInstance = await WebAssembly.instantiate(wasmModule);
+                
+                // Log the WASM instance for debugging
+                console.log(wasmInstance);
+                
+                // Assuming the WASM file exports a function named `yourFunction`
+                if (wasmInstance.exports.main) {
+                    console.log('Calling main...');
+                    const result = wasmInstance.exports.main();
+                    console.log('Result:', result);
+                    document.getElementById('output').innerText = 'Result: ' + result;
+                } else {
+                    console.error('Function "main" not found in WASM module.');
+                }
+            } catch (error) {
+                console.error('Error loading WASM:', error);
+                document.getElementById('output').innerText = 'Error loading WASM. Check console for details.';
+            }
+        });
+    </script>
+</body>
+</html>

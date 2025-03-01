@@ -1,16 +1,16 @@
-struct Test {
-    a: Bool
+struct test_test {
+    a: bool
 }
 
-fn main() -> Test {
-    let a: Bool = false;
-    let b = Test { a: a };
+main: fn() -> test_test {
+    let a: bool = false;
+    let b = test_test { a: a };
     print(b);
     return b;
 }
 
 // Builtins
-struct Bool
-struct Int32
-struct Int64
-struct Float64
+struct bool
+struct int32
+struct int64
+struct float64

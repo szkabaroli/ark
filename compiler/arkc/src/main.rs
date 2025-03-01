@@ -45,8 +45,7 @@ struct CompilerArgs {
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone, ValueEnum)]
 pub enum Backend {
-    // Cranelift,
-    Bytecode,
+    Wasm,
     Llvm,
 }
 
@@ -56,17 +55,6 @@ fn validate_opt_argument(arg: &str) -> Result<char, &'static str> {
         _ => Err("Argument to -O must be one of: 0, 1, 2, 3, s, or z"),
     }
 }
-
-/// Convenience macro for unwrapping a Result or printing an error message and returning () on Err.
-macro_rules! expect {( $result:expr , $fmt_string:expr $( , $($msg:tt)* )? ) => ({
-    match $result {
-        Ok(t) => t,
-        Err(_) => {
-            print!($fmt_string $( , $($msg)* )? );
-            return ();
-        },
-    }
-});}
 
 fn compile(args: CompilerArgs) {
     // Setup the cache and read from the first file
@@ -92,9 +80,6 @@ fn compile(args: CompilerArgs) {
         std::process::exit(1);
     }
 
-    // let main_fn = fn_by_name(&sa, "main");
-    // println!("main {:?}", main_fn);
-
     if let Some(ref filter) = args.emit_ast {
         arkc_frontend::emit_ast(&sa, filter);
     }
@@ -115,15 +100,15 @@ fn compile(args: CompilerArgs) {
     let backend = args.backend.unwrap_or(default_backend);
 
     match backend {
-        Backend::Bytecode => {
-            if cfg!(feature = "bc") {
-                #[cfg(feature = "bc")]
+        Backend::Wasm => {
+            if cfg!(feature = "wasm") {
+                #[cfg(feature = "wasm")]
                 {
                     let hir = sa.compilation.hir.borrow();
-                    arkc_codegen_bc::codegen(&hir[0]);
+                    arkc_codegen_wasm::codegen(&hir[0]).unwrap();
                 }
             } else {
-                eprintln!("The bc backend is required running in interpreted mode. Recompile ark with --features 'bc'.");
+                eprintln!("The bc backend is required running in interpreted mode. Recompile ark with --features 'wasm'.");
             }
         }
         Backend::Llvm => {

@@ -11,21 +11,21 @@ pub fn lookup_known_fundamental_types(sa: &mut Sema) {
     sa.compilation.known.structs.bool = Some(internal_struct(
         sa,
         stdlib_id,
-        "Bool",
+        "bool",
         Some(PrimitiveType::Bool),
     ));
 
-    sa.compilation.known.structs.bool = Some(internal_struct(
+    sa.compilation.known.structs.int32 = Some(internal_struct(
         sa,
         stdlib_id,
-        "Int32",
+        "int32",
         Some(PrimitiveType::Int32),
     ));
 
-    sa.compilation.known.structs.bool = Some(internal_struct(
+    sa.compilation.known.structs.int64 = Some(internal_struct(
         sa,
         stdlib_id,
-        "Int64",
+        "int64",
         Some(PrimitiveType::Int64),
     ));
 }

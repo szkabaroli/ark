@@ -1,0 +1,100 @@
+package local:demo;
+
+package wasi:cli {
+    interface run {
+        run: func() -> result {
+            return ok;
+        }
+    }
+}
+package local:demo {
+    interface main {
+        
+    }
+}
+
+package wasi:cli {
+    record test {
+        a: string,
+        b: string
+
+        default: (hidden) init() {
+            self.a = :default;
+            self.b = :default;
+        }
+
+        new: init(a: string, b: string) {
+            self.a = a;
+            self.b = b;        
+        }
+    }
+
+    interface run {
+        run: flow() -> result {
+            :in -> (ok) -> :out
+        }
+
+        run: flow(test: string) -> (ret: result, num, option<u32>) 
+        with  
+            parse_node: parse @pos(10, 10), 
+            test: test2 @pos(10, 10),
+            create_request: test.new
+        {
+            :in
+            --> sequence {
+                --> (ok, none) --> :out
+                --> (ok, (test) --> parse_node) --> :out
+                --> if(true) {
+                    :then --> ("test", "test") --> create_request
+                    :else -->  
+                }
+            }
+        }
+
+        run: func(test: string) -> (ret: result, num, option<u32>) {
+            return (ok, parse(test))
+        }
+    }
+}
+
+package wasi:http {
+    interface incoming-handler {
+        use types.{IncomingRequest, ResponseOutparam};
+
+        handle: func(request: IncomingRequest, resp: ResponseOutparam) {
+            let outgoing_response = OutgoingResponse(Fields());
+            let outgoing_body = outgoing_response.body();
+            let output_stream = outgoing_body.write();
+            output_stream.blocking_write_and_flush("hello".to_bytes());
+
+            outgoing_response.set_status_code(200);
+            OutgoingBody.finish(outgoingBody, undefined);
+            ResponseOutparam.set(resp, { tag: "ok", val: outgoingResponse });
+        }
+    }
+}
+
+record test_test {
+    a: bool
+}
+
+fn malloc() {}
+
+interface test {
+    
+}
+
+fn main() -> test_test {
+    @clz();
+
+    let a: bool = false;
+    let b = test_test { a: a };
+    print(b);
+    return b;
+}
+
+// Builtins
+struct bool
+struct int32
+struct int64
+struct float64
