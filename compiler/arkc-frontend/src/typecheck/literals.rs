@@ -1,10 +1,8 @@
 use arkc_hir::hir::HirId;
 use arkc_hir::ty;
 use arkc_hir::ty::PrimitiveType;
-use parser::Span;
 
 use crate::error::ErrorMessage;
-use crate::Sema;
 
 fn parse_lit_int(mut value: &str) -> (u32, String, String) {
     let base = if value.starts_with("0b") {
@@ -43,8 +41,8 @@ fn parse_lit_int(mut value: &str) -> (u32, String, String) {
 fn determine_suffix_type_int_literal(suffix: &str) -> Option<ty::Type> {
     match suffix {
         //"u8" => Some(ty::Type::UInt8),
-        //"i32" => Some(ty::Type::Int32),
-        //"i64" => Some(ty::Type::Int64),
+        "i32" => Some(ty::Type::Primitive(PrimitiveType::Int32)),
+        "i64" => Some(ty::Type::Primitive(PrimitiveType::Int64)),
         //"f32" => Some(ty::Type::Float32),
         //"f64" => Some(ty::Type::Float64),
         "" => None,
@@ -69,7 +67,7 @@ pub fn check_lit_int(
         // ty::Type::UInt8 if !negate => ty::Type::UInt8,
         ty::Type::Primitive(PrimitiveType::Int32) => ty::Type::Primitive(PrimitiveType::Int32),
         ty::Type::Primitive(PrimitiveType::Int64) => ty::Type::Primitive(PrimitiveType::Int64),
-        _ => ty::Type::Primitive(PrimitiveType::Int64),
+        _ => ty::Type::Primitive(PrimitiveType::Int32),
     });
 
     if ty.is_float() {
@@ -155,8 +153,8 @@ pub fn check_lit_float(
     }
 
     let ty = match suffix.as_str() {
-        //"f32" => ty::Type::Float32,
-        //"f64" => ty::Type::Float64,
+        "f32" => ty::Type::Primitive(ty::PrimitiveType::Float32),
+        "f64" => ty::Type::Primitive(ty::PrimitiveType::Float64),
         "" => ty::Type::Primitive(ty::PrimitiveType::Float64),
         _ => {
             panic!("{:?}", ErrorMessage::UnknownSuffix);
@@ -166,7 +164,7 @@ pub fn check_lit_float(
     };
 
     let (min, max) = match ty {
-        // ty::Type::Float32 => (f32::MIN as f64, f32::MAX as f64),
+        ty::Type::Primitive(ty::PrimitiveType::Float32) => (f32::MIN as f64, f32::MAX as f64),
         ty::Type::Primitive(ty::PrimitiveType::Float64) => (f64::MIN, f64::MAX),
         _ => unreachable!(),
     };

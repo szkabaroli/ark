@@ -24,11 +24,16 @@ pub fn parse_type(sa: &Sema, root: &hir::File, table: &ModuleSymTable, t: &hir::
         hir::TypeData::Fn(ref node) => read_type_fn_unchecked(sa, root, table, node),
         //ast::TypeData::Tuple(ref node) => read_type_tuple_unchecked(sa, table, file_id, node),
         //ast::TypeData::Generic(..) | ast::TypeData::Path(..) => unreachable!(),
-        hir::TypeData::Unknown { .. } => Type::Unknown,
+        hir::TypeData::Unknown { .. } => Type::Error,
     }
 }
 
-fn read_type_fn_unchecked(sa: &Sema, root: &hir::File, table: &ModuleSymTable, node: &hir::FnType) -> Type {
+fn read_type_fn_unchecked(
+    sa: &Sema,
+    root: &hir::File,
+    table: &ModuleSymTable,
+    node: &hir::FnType,
+) -> Type {
     let mut params = vec![];
 
     for param in &node.params {
@@ -51,11 +56,16 @@ fn read_type_fn_unchecked(sa: &Sema, root: &hir::File, table: &ModuleSymTable, n
     })
 }
 
-fn read_type_basic_unchecked(sa: &Sema, root: &hir::File, table: &ModuleSymTable, basic: &hir::BasicType) -> Type {
+fn read_type_basic_unchecked(
+    sa: &Sema,
+    root: &hir::File,
+    table: &ModuleSymTable,
+    basic: &hir::BasicType,
+) -> Type {
     let sym = read_type_path(sa, table, basic);
 
     if sym.is_err() {
-        return Type::Unknown;
+        return Type::Error;
     }
 
     let sym = sym.unwrap();
@@ -75,7 +85,7 @@ fn read_type_basic_unchecked(sa: &Sema, root: &hir::File, table: &ModuleSymTable
             let msg = ErrorMessage::UnknownType(name);
             panic!("{:?}", msg);
             // sa.report(node.span, msg);
-            Type::Unknown
+            Type::Error
         }
 
         None => {
@@ -83,7 +93,7 @@ fn read_type_basic_unchecked(sa: &Sema, root: &hir::File, table: &ModuleSymTable
             let msg = ErrorMessage::UnknownIdentifier(name);
             panic!("{:?}", msg);
             // sa.report(node.span, msg);
-            Type::Unknown
+            Type::Error
         }
     }
 }
@@ -166,6 +176,7 @@ fn verify_type_basic(
         | Type::Primitive(PrimitiveType::Char)
         | Type::Primitive(PrimitiveType::Int32)
         | Type::Primitive(PrimitiveType::Int64)
+        | Type::Primitive(PrimitiveType::Float32)
         | Type::Primitive(PrimitiveType::Float64) => {
             return true;
             //let struct_id = ty
@@ -191,7 +202,7 @@ fn verify_type_basic(
             //    return false;
             //}
         }
-        Type::Unknown => return false,
+        Type::Error => return false,
     }
 
     true
@@ -206,18 +217,12 @@ pub fn check_type(
 ) -> Type {
     let ty = parse_type(sa, root, table, t);
 
-    let is_good = verify_type(
-        sa,
-        table.module_id(),
-        t,
-        ty.clone(),
-        allow_self,
-    );
+    let is_good = verify_type(sa, table.module_id(), t, ty.clone(), allow_self);
 
     if is_good {
         ty
     } else {
-        Type::Unknown
+        Type::Error
     }
 }
 
@@ -235,7 +240,7 @@ pub fn expand_type(
     if is_good {
         replace_type(sa, ty, None, AliasReplacement::ReplaceWithActualType)
     } else {
-        Type::Unknown
+        Type::Error
     }
 }
 
@@ -267,8 +272,9 @@ pub fn replace_type(
         | Type::Primitive(PrimitiveType::Char)
         | Type::Primitive(PrimitiveType::Int32)
         | Type::Primitive(PrimitiveType::Int64)
+        | Type::Primitive(PrimitiveType::Float32)
         | Type::Primitive(PrimitiveType::Float64)
-        | Type::Unknown => ty,
+        | Type::Error => ty,
         Type::Struct(id) => Type::Struct(id),
         Type::Any => {
             panic!("unexpected type = {:?}", ty);

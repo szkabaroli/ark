@@ -60,7 +60,39 @@ pub type Path = Arc<PathData>;
 pub struct PathData {
     pub id: NodeId,
     pub span: Span,
-    pub names: Vec<Ident>,
+    pub segments: Vec<PathSegment>,
+}
+
+pub type PathSegment = Arc<PathSegmentData>;
+
+#[derive(Clone, Debug)]
+pub enum PathSegmentData {
+    Self_(PathSegmentSelf),
+    Ident(PathSegmentIdent),
+    Error { id: NodeId, span: Span },
+}
+
+impl PathSegmentData {
+    #[cfg(test)]
+    pub fn as_name_str(&self) -> &str {
+        match self {
+            PathSegmentData::Ident(ref ident) => &ident.name.name_as_string,
+            _ => unreachable!(),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct PathSegmentSelf {
+    pub id: NodeId,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct PathSegmentIdent {
+    pub id: NodeId,
+    pub span: Span,
+    pub name: Ident,
 }
 
 pub type Type = Arc<TypeData>;
@@ -147,15 +179,13 @@ pub struct TypePrimitiveType {
 
 impl TypeBasicType {
     #[cfg(test)]
-    pub fn name(&self) -> String {
-        assert_eq!(self.path.names.len(), 1);
+    pub fn name(&self) -> &str {
+        assert_eq!(self.path.segments.len(), 1);
         self.path
-            .names
+            .segments
             .last()
-            .cloned()
-            .unwrap()
-            .name_as_string
-            .clone()
+            .expect("missing segment")
+            .as_name_str()
     }
 }
 
@@ -404,7 +434,7 @@ pub struct InterfaceItem {
     pub id: NodeId,
     pub span: Span,
     pub name: Option<Ident>,
-    pub green: GreenNode
+    pub green: GreenNode,
 }
 
 #[derive(Clone, Debug)]
@@ -412,7 +442,7 @@ pub struct GlobalItem {
     pub id: NodeId,
     pub span: Span,
     pub name: Option<Ident>,
-    pub green: GreenNode
+    pub green: GreenNode,
 }
 
 #[derive(Clone, Debug)]
@@ -617,7 +647,7 @@ pub enum ExprKind {
     Literal(Literal),
     //Template(ExprTemplateType),
     Ident(ExprIdentType),
-    Call(Call),
+    Call(ExprCallType),
     //TypeParam(ExprTypeParamType),
     Path(ExprPathType),
     Dot(Dot),
@@ -808,8 +838,8 @@ impl ExprKind {
         })
     }
 
-    pub fn create_call(id: NodeId, span: Span, callee: Expr, args: Vec<Expr>) -> ExprKind {
-        ExprKind::Call(Call {
+    pub fn create_call(id: NodeId, span: Span, callee: Expr, args: Vec<Arc<Argument>>) -> ExprKind {
+        ExprKind::Call(ExprCallType {
             id,
             span,
             callee,
@@ -875,7 +905,7 @@ impl ExprKind {
         }
     }
 
-    pub fn to_call(&self) -> Option<&Call> {
+    pub fn to_call(&self) -> Option<&ExprCallType> {
         match *self {
             ExprKind::Call(ref val) => Some(val),
             _ => None,
@@ -1136,12 +1166,20 @@ pub struct ExprPathType {
 }
 
 #[derive(Clone, Debug)]
-pub struct Call {
+pub struct Argument {
+    pub id: NodeId,
+    pub span: Span,
+    pub name: Option<Ident>,
+    pub expr: Expr,
+}
+
+#[derive(Clone, Debug)]
+pub struct ExprCallType {
     pub id: NodeId,
     pub span: Span,
 
     pub callee: Expr,
-    pub args: Vec<Expr>,
+    pub args: Vec<Arc<Argument>>,
 }
 
 #[derive(PartialEq, Eq, Debug, Copy, Clone)]

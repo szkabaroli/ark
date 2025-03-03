@@ -1,16 +1,18 @@
+use std::{ops::Index, sync::Arc};
+
 use serde::{Deserialize, Serialize};
 
 use crate::hir::HirId;
 
 /// Function types.
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Debug, Hash, Serialize, Deserialize)]
 pub struct FnType {
     pub inputs: Vec<Type>,
     pub output: Option<Box<Type>>,
     pub is_varargs: bool,
 }
 
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Debug, Hash, Serialize, Deserialize)]
 pub enum Type {
     Any,
     This,
@@ -25,20 +27,21 @@ pub enum Type {
     Function(FnType),
 
     // TODO: Struct(StructType),
-    Unknown,
+    Error,
 }
 
 impl Type {
     pub fn name(&self) -> String {
         match self {
-            Type::Unknown => "<unknown>".into(),
+            Type::Error => "<error>".into(),
             Type::Any => "Any".into(),
             Type::Primitive(PrimitiveType::Unit) => "()".into(),
-            Type::Primitive(PrimitiveType::Bool) => "Bool".into(),
-            Type::Primitive(PrimitiveType::Char) => "Char".into(),
-            Type::Primitive(PrimitiveType::Int32) => "Int32".into(),
-            Type::Primitive(PrimitiveType::Int64) => "Int64".into(),
-            Type::Primitive(PrimitiveType::Float64) => "Float64".into(),
+            Type::Primitive(PrimitiveType::Bool) => "bool".into(),
+            Type::Primitive(PrimitiveType::Char) => "char".into(),
+            Type::Primitive(PrimitiveType::Int32) => "int32".into(),
+            Type::Primitive(PrimitiveType::Int64) => "int64".into(),
+            Type::Primitive(PrimitiveType::Float32) => "float32".into(),
+            Type::Primitive(PrimitiveType::Float64) => "float64".into(),
             Type::Struct(sid) => {
                 "Struct".into()
                 /*let struct_ = self.sa.struct_(sid);
@@ -69,6 +72,13 @@ impl Type {
         }
     }
 
+    pub fn as_primitive(&self) -> Option<&PrimitiveType> {
+        match self {
+            Type::Primitive(prim) => Some(prim),
+            _ => None,
+        }
+    }
+
     pub fn is_float(&self) -> bool {
         match self {
             Type::Primitive(PrimitiveType::Float64) => true,
@@ -76,20 +86,22 @@ impl Type {
         }
     }
 
-    pub fn is_unknown(&self) -> bool {
+    pub fn is_error(&self) -> bool {
         match self {
-            Type::Unknown => true,
+            Type::Error => true,
             _ => false,
         }
     }
+
     pub fn is_defined_type(&self) -> bool {
         match self {
-            Type::Unknown | Type::This | Type::Any /*| Type::Ptr*/ => false,
+            Type::Error | Type::This | Type::Any /*| Type::Ptr*/ => false,
             Type::Primitive(PrimitiveType::Unit)
             | Type::Primitive(PrimitiveType::Bool)
             | Type::Primitive(PrimitiveType::Char)
             | Type::Primitive(PrimitiveType::Int32)
             | Type::Primitive(PrimitiveType::Int64)
+            | Type::Primitive(PrimitiveType::Float32)
             | Type::Primitive(PrimitiveType::Float64)
             | Type::Function(_) => true,
             Type::Struct(_) => {
@@ -113,9 +125,9 @@ impl Type {
 pub enum PrimitiveType {
     Unit,
     Bool,
-    // Uint8,
     Int32,
     Int64,
+    Float32,
     Float64,
     Char,
 }
@@ -124,68 +136,133 @@ impl Type {
     pub fn allows(&self, other: Type) -> bool {
         match self {
             Type::This => true,
-            Type::Unknown => true,
+            Type::Error => true,
             // Any allows all other types
             Type::Any => true,
             Type::Primitive(PrimitiveType::Unit)
             | Type::Primitive(PrimitiveType::Bool)
-            // | Type::Primitive(PrimitiveType::Uint8)
             | Type::Primitive(PrimitiveType::Char)
-            | Type::Struct(_)
-            //| Type::Enum(_, _)
-            //| Type::Trait(_, _) 
-            => *self == other,
-            Type::Primitive(PrimitiveType::Int32) | Type::Primitive(PrimitiveType::Int64) | Type::Primitive(PrimitiveType::Float64) => {
-                *self == other
-            }
-            // Type::Primitive(PrimitiveType::Ptr) => panic!("ptr does not allow any other types"),
+            | Type::Struct(_) => *self == other,
+            Type::Primitive(PrimitiveType::Int32)
+            | Type::Primitive(PrimitiveType::Int64)
+            | Type::Primitive(PrimitiveType::Float32)
+            | Type::Primitive(PrimitiveType::Float64) => *self == other,
             Type::Function(_) => *self == other,
-            //Type::This | Type::TypeAlias(..) => unreachable!(),
-            /*Type::Class(self_cls_id, self_list) => {
-                if *self == other {
-                    return true;
+        }
+    }
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TypeArray {
+    Empty,
+    List(Arc<Vec<Type>>),
+}
+
+impl TypeArray {
+    pub fn empty() -> TypeArray {
+        TypeArray::Empty
+    }
+
+    pub fn new(types: Arc<Vec<Type>>) -> TypeArray {
+        TypeArray::List(types)
+    }
+
+    pub fn single(ty: Type) -> TypeArray {
+        TypeArray::List(Arc::new(vec![ty]))
+    }
+
+    pub fn with(type_params: Vec<Type>) -> TypeArray {
+        if type_params.len() == 0 {
+            TypeArray::Empty
+        } else {
+            TypeArray::List(Arc::new(type_params))
+        }
+    }
+
+    pub fn connect(&self, other: &TypeArray) -> TypeArray {
+        if self.is_empty() {
+            return other.clone();
+        }
+
+        if other.is_empty() {
+            return self.clone();
+        }
+
+        let mut params = self.types().to_vec();
+        params.extend_from_slice(other.types());
+
+        TypeArray::List(Arc::new(params))
+    }
+
+    pub fn types(&self) -> &[Type] {
+        match self {
+            TypeArray::Empty => &[],
+            TypeArray::List(ref params) => (**params).as_slice(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn len(&self) -> usize {
+        match self {
+            &TypeArray::Empty => 0,
+            &TypeArray::List(ref params) => params.len(),
+        }
+    }
+}
+
+impl Index<usize> for TypeArray {
+    type Output = Type;
+
+    fn index(&self, idx: usize) -> &Type {
+        match self {
+            &TypeArray::Empty => panic!("type list index out-of-bounds"),
+            &TypeArray::List(ref params) => &params[idx],
+        }
+    }
+}
+
+impl From<Vec<Type>> for TypeArray {
+    fn from(value: Vec<Type>) -> Self {
+        TypeArray::with(value)
+    }
+}
+
+impl From<Type> for TypeArray {
+    fn from(value: Type) -> Self {
+        TypeArray::single(value)
+    }
+}
+
+impl From<()> for TypeArray {
+    fn from(_value: ()) -> Self {
+        TypeArray::empty()
+    }
+}
+
+pub struct TypeArrayIter<'a> {
+    params: &'a TypeArray,
+    idx: usize,
+}
+
+impl<'a> Iterator for TypeArrayIter<'a> {
+    type Item = Type;
+
+    fn next(&mut self) -> Option<Type> {
+        match self.params {
+            &TypeArray::Empty => None,
+            &TypeArray::List(ref params) => {
+                if self.idx < params.len() {
+                    let ret = params[self.idx].clone();
+                    self.idx += 1;
+
+                    Some(ret)
+                } else {
+                    None
                 }
-
-                let (other_cls_id, other_list) = match other {
-                    Type::Class(cls_id, ref other_list) => (cls_id, other_list.clone()),
-                    _ => {
-                        return false;
-                    }
-                };
-
-                *self_cls_id == other_cls_id && self_list == &other_list
-            }*/
-            /*Type::Tuple(subtypes) => match other {
-                Type::Tuple(other_subtypes) => {
-                    if subtypes.len() != other_subtypes.len() {
-                        return false;
-                    }
-
-                    let len = subtypes.len();
-
-                    for idx in 0..len {
-                        let ty = subtypes[idx].clone();
-                        let other_ty = other_subtypes[idx].clone();
-
-                        if !ty.allows(sa, other_ty) {
-                            return false;
-                        }
-                    }
-
-                    true
-                }
-
-                _ => false,
-            },*/
-
-            //Type::TypeParam(_) => *self == other,
-
-            // Type::Lambda(_, _) => {
-                // for now expect the exact same params and return types
-                // possible improvement: allow super classes for params,
-                //                             sub class for return type
-              //  *self == other
-            //}
+            }
         }
     }
 }

@@ -5,16 +5,18 @@ mod error;
 mod fndefcheck;
 mod interner;
 mod known;
+mod operator_registry;
 mod program_parser;
 mod readty;
 mod resolve;
 mod stdlib_lookup;
 mod strudefcheck;
 mod sym;
+mod access;
 mod typecheck;
 
 use arkc_ast_lowering::lower_file;
-use arkc_hir::hir;
+use arkc_hir::{hir, ty};
 use error::msg::ErrorMessage;
 use program_parser::ProgramParser;
 use resolve::SymbolResolver;
@@ -38,6 +40,31 @@ pub const CONFIG: bincode::config::Configuration = bincode::config::standard();
 
 pub fn check_program(sa: &mut Sema) -> bool {
     // This phase loads and parses all files.
+
+    sa.operators.register_builtin(
+        hir::BinOpKind::Add,
+        ty::Type::Primitive(ty::PrimitiveType::Int32),
+        ty::Type::Primitive(ty::PrimitiveType::Int32),
+        ty::Type::Primitive(ty::PrimitiveType::Int32),
+    );
+    sa.operators.register_builtin(
+        hir::BinOpKind::Add,
+        ty::Type::Primitive(ty::PrimitiveType::Int64),
+        ty::Type::Primitive(ty::PrimitiveType::Int64),
+        ty::Type::Primitive(ty::PrimitiveType::Int64),
+    );
+    sa.operators.register_builtin(
+        hir::BinOpKind::Sub,
+        ty::Type::Primitive(ty::PrimitiveType::Int32),
+        ty::Type::Primitive(ty::PrimitiveType::Int32),
+        ty::Type::Primitive(ty::PrimitiveType::Int32),
+    );
+    sa.operators.register_builtin(
+        hir::BinOpKind::Sub,
+        ty::Type::Primitive(ty::PrimitiveType::Int64),
+        ty::Type::Primitive(ty::PrimitiveType::Int64),
+        ty::Type::Primitive(ty::PrimitiveType::Int64),
+    );
 
     let ast = {
         let mut parser = ProgramParser::new(sa);

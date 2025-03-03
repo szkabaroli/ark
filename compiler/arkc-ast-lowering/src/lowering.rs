@@ -1,7 +1,9 @@
 use arkc_hir::hir::{self, NodeMap};
 use arkc_hir::hir_map::HirMap;
+use arkc_hir::parsety::ParsedType;
 use parser::ast::{self, ElemData};
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 pub struct LoweringContext {
     hir_map: HirMap,
@@ -71,9 +73,14 @@ impl LoweringContext {
                 path: hir::Path {
                     names: basic
                         .path
-                        .names
+                        .segments
                         .iter()
-                        .map(|n| self.lower_identifier(n))
+                        .map(|n| match &**n {
+                            ast::PathSegmentData::Ident(path_segment_ident) => {
+                                self.lower_identifier(&path_segment_ident.name)
+                            }
+                            _ => todo!(),
+                        })
                         .collect(),
                 },
             }),
@@ -146,9 +153,17 @@ impl LoweringContext {
             //    .iter()
             //    .map(|arg| self.lower_argument_decl(arg))
             //    .collect(),
+            return_type: ParsedType::new_ast(func.signature.output.as_ref().unwrap().clone()),
             body_id,
             signature,
             hir_id,
+        }
+    }
+
+    pub fn lower_binop(&mut self, op: &ast::BinOp) -> hir::BinOp {
+        hir::BinOp {
+            hir_id: self.hir_map.next_hir_id(op.id),
+            kind: self.lower_binopkind(&op.op),
         }
     }
 
@@ -179,6 +194,15 @@ impl LoweringContext {
             ast::ExprKind::Call(call) => hir::Expr {
                 hir_id: self.hir_map.next_hir_id(call.id),
                 kind: Box::from(hir::ExprKind::Call(self.lower_call(call))),
+            },
+            ast::ExprKind::Paren(paren) => self.lower_expression(&paren.expr),
+            ast::ExprKind::Bin(op, lhs, rhs) => hir::Expr {
+                hir_id: self.hir_map.next_hir_id(op.id),
+                kind: Box::from(hir::ExprKind::Bin(
+                    self.lower_binop(op),
+                    self.lower_expression(lhs),
+                    self.lower_expression(rhs),
+                )),
             },
             _ => unimplemented!(),
         }
@@ -272,6 +296,18 @@ impl LoweringContext {
         }
     }
 
+    fn lower_binopkind(&mut self, op: &ast::BinOpKind) -> hir::BinOpKind {
+        match op {
+            ast::BinOpKind::Add => hir::BinOpKind::Add,
+            ast::BinOpKind::Sub => hir::BinOpKind::Sub,
+            ast::BinOpKind::Mul => hir::BinOpKind::Mul,
+            ast::BinOpKind::Div => hir::BinOpKind::Div,
+            ast::BinOpKind::Or => hir::BinOpKind::Or,
+            ast::BinOpKind::And => hir::BinOpKind::And,
+            _ => todo!(),
+        }
+    }
+
     fn lower_literal(&mut self, lit: &ast::Literal) -> hir::Literal {
         let kind = match &lit.kind {
             ast::LitKind::Unit => hir::LiteralKind::Unit,
@@ -287,12 +323,30 @@ impl LoweringContext {
             kind,
         }
     }
-    
-    fn lower_call(&mut self, call: &ast::Call) -> hir::FnCall {
+
+    fn lower_call_argument(&mut self, arg: &ast::Argument) -> Arc<hir::Argument> {
+        let name = if let Some(ref name) = arg.name {
+            Some(self.lower_identifier(name))
+        } else {
+            None
+        };
+
+        Arc::new(hir::Argument {
+            hir_id: self.hir_map.next_hir_id(arg.id),
+            expr: self.lower_expression(&arg.expr),
+            name,
+        })
+    }
+
+    fn lower_call(&mut self, call: &ast::ExprCallType) -> hir::FnCall {
         hir::FnCall {
             hir_id: self.hir_map.next_hir_id(call.id),
             callee: self.lower_expression(&call.callee),
-            args: call.args.iter().map(|arg| self.lower_expression(&arg),).collect(),
+            args: call
+                .args
+                .iter()
+                .map(|arg| self.lower_call_argument(&arg))
+                .collect(),
         }
     }
 }

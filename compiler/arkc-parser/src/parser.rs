@@ -277,6 +277,20 @@ impl Parser {
         self.current() == kind
     }
 
+    fn is2(&self, fst: TokenKind, snd: TokenKind) -> bool {
+        if !self.is(fst) {
+            return false;
+        }
+
+        let mut idx = 1;
+
+        while self.nth(idx).is_trivia() {
+            idx += 1;
+        }
+
+        self.nth(idx) == snd
+    }
+
     fn report_error(&mut self, msg: ParseError) {
         self.report_error_at(msg, self.current_span());
     }
@@ -568,7 +582,7 @@ impl Parser {
             let body = self.parse_function_body();
 
             let green = self.builder.finish_node(FN);
-            
+
             ElemData::Function(Arc::new(ast::FnItem {
                 id: self.new_node_id(),
                 green,
@@ -672,30 +686,46 @@ impl Parser {
         }
     }
 
+    fn parse_path_segment(&mut self) -> PathSegment {
+        if self.is(IDENTIFIER) {
+            self.start_node();
+            let name = self.expect_identifier().expect("ident expected");
+            Arc::new(PathSegmentData::Ident(PathSegmentIdent {
+                id: self.new_node_id(),
+                span: self.finish_node(),
+                name,
+            }))
+        } else if self.is(UPCASE_SELF_KW) {
+            self.start_node();
+            self.assert(UPCASE_SELF_KW);
+            Arc::new(PathSegmentData::Self_(PathSegmentSelf {
+                id: self.new_node_id(),
+                span: self.finish_node(),
+            }))
+        } else {
+            let span = self.current_span();
+            Arc::new(PathSegmentData::Error {
+                id: self.new_node_id(),
+                span,
+            })
+        }
+    }
+
     fn parse_path(&mut self) -> Path {
         self.start_node();
-        let mut names = Vec::new();
-        let name = self.expect_identifier();
-        if let Some(name) = name {
-            names.push(name);
-        } else {
-            // Advance by token to avoid infinite loop in `parse_match`.
-            self.advance();
-        }
+        let mut segments = Vec::new();
+        let segment = self.parse_path_segment();
+        segments.push(segment);
 
         while self.eat(COLON_COLON) {
-            let name = self.expect_identifier();
-            if let Some(name) = name {
-                names.push(name);
-            } else {
-                break;
-            }
+            let segment = self.parse_path_segment();
+            segments.push(segment);
         }
 
         Arc::new(PathData {
             id: self.new_node_id(),
             span: self.finish_node(),
-            names,
+            segments,
         })
     }
 
@@ -1308,8 +1338,30 @@ impl Parser {
             ParseError::ExpectedExpression,
             ARG_LIST,
             |p| {
-                if p.is_set(EXPRESSION_FIRST) {
-                    Some(p.parse_expression())
+                if p.is2(IDENTIFIER, EQ) {
+                    let start = p.current_span().start();
+                    let name = p.expect_identifier();
+                    p.assert(EQ);
+                    let expr = p.parse_expression();
+                    let span = p.span_from(start);
+
+                    Some(Arc::new(Argument {
+                        id: p.new_node_id(),
+                        name,
+                        span,
+                        expr,
+                    }))
+                } else if p.is_set(EXPRESSION_FIRST) {
+                    let start = p.current_span().start();
+                    let expr = p.parse_expression();
+                    let span = p.span_from(start);
+
+                    Some(Arc::new(Argument {
+                        id: p.new_node_id(),
+                        name: None,
+                        span,
+                        expr,
+                    }))
                 } else {
                     None
                 }

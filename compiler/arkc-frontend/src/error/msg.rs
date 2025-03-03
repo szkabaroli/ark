@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
-use parser::SourceFileId;
 use crate::sema::Sema;
+use parser::SourceFileId;
 
 use parser::{compute_line_column, Span};
 
@@ -9,21 +9,21 @@ use parser::{compute_line_column, Span};
 pub enum ErrorMessage {
     Unimplemented,
     UnknownClass(String),
-    UnknownType(String),
     UnknownIdentifier(String),
+    UnknownType(String),
     UnknownStruct(String),
     UnknownFunction(String),
     UnknownField(String, String),
-    UnknownMethod(String, String, Vec<String>),
+    UnknownMethod(String, String),
     UnknownEnumVariant(String),
     UnknownSuffix,
-    MultipleCandidatesForMethod(String, String, Vec<String>),
+    MultipleCandidatesForMethod(String, String),
     VariadicParameterNeedsToBeLast,
     UnknownMethodForTypeParam,
     MultipleCandidatesForTypeParam,
     MultipleCandidatesForStaticMethodWithTypeParam,
     UnknownStaticMethodWithTypeParam,
-    UnknownStaticMethod(String, String, Vec<String>),
+    UnknownStaticMethod(String, String),
     UnknownCtor,
     AliasExists(String, Span),
     TypeExists(String, Span),
@@ -47,14 +47,15 @@ pub enum ErrorMessage {
     NoEnumVariant,
     EnumArgsIncompatible(String, String, Vec<String>, Vec<String>),
     StructArgsIncompatible(String, Vec<String>, Vec<String>),
-    EnumArgsNoParens(String, String),
-    MatchPatternNoParens,
-    MatchPatternWrongNumberOfParams(usize, usize),
+    UnexpectedArgumentsForEnumVariant,
+    EnumVariantMissingArguments,
+    PatternNoParens,
+    PatternWrongNumberOfParams(usize, usize),
     EnumExpected,
     EnumMismatch(String, String),
     EnumVariantExpected,
-    MatchUncoveredVariant,
-    MatchUnreachablePattern,
+    NonExhaustiveMatch(Vec<String>),
+    UselessPattern,
     VarNeedsTypeOrExpression,
     ParamTypesIncompatible(String, Vec<String>, Vec<String>),
     LambdaParamTypesIncompatible(Vec<String>, Vec<String>),
@@ -62,7 +63,7 @@ pub enum ErrorMessage {
     IfCondType(String),
     ReturnType(String, String),
     LvalueExpected,
-    AssignType(String, String, String),
+    AssignType(String, String),
     AssignField(String, String, String, String),
     UnOpType(String, String),
     BinOpType(String, String, String),
@@ -111,9 +112,9 @@ pub enum ErrorMessage {
     ExpectedSomeIdentifier,
     ExpectedModule,
     ExpectedPath,
-    LetPatternExpectedTuple(String),
-    LetPatternShouldBeUnit,
-    LetPatternExpectedTupleWithLength(String, usize, usize),
+    PatternTupleExpected(String),
+    WrongType(String, String),
+    PatternTupleLengthMismatch(String, usize, usize),
     MisplacedElse,
     ValueExpected,
     IoError,
@@ -127,10 +128,10 @@ pub enum ErrorMessage {
     ThisOrSuperExpected(String),
     NoSuperDelegationWithPrimaryCtor(String),
     NoSuperClass(String),
-    NotAccessible(String),
+    NotAccessible,
     UnexpectedTypeAliasAssignment,
     StructConstructorNotAccessible(String),
-    StructFieldImmutable,
+    ImmutableField,
     ClassConstructorNotAccessible(String),
     NotAccessibleInModule(String, String),
     RecursiveStructure,
@@ -144,11 +145,9 @@ pub enum ErrorMessage {
     WrongNumberTypeParams(usize, usize),
     UnconstrainedTypeParam(String),
     StaticMethodCallTargetExpected,
-    ExpectedImplTraitType,
-    ExpectedImplType,
+    ExpectedExtensionType,
     BoundExpected,
     NoTypeParamsExpected,
-    DuplicateTraitBound,
     TypeNotImplementingTrait(String, String),
     AbstractMethodNotInAbstractClass,
     AbstractMethodWithImplementation,
@@ -166,10 +165,9 @@ pub enum ErrorMessage {
     NameOfStaticMethodExpected,
     IfBranchTypesIncompatible(String, String),
     MatchBranchTypesIncompatible(String, String),
-    VarAlreadyInPattern,
     NameExpected,
     IndexExpected,
-    IllegalTupleIndex(u64, String),
+    IllegalTupleIndex(usize, String),
     UninitializedVar,
     DirectoryNotFound(PathBuf),
     FileForModuleNotFound,
@@ -182,11 +180,47 @@ pub enum ErrorMessage {
     NegativeUnsigned,
     InvalidCharLiteral,
     InvalidReturn,
-    MatchMultiplePatternsWithParamsNotSupported,
+    PatternAltWithBindingUnsupported,
     UseNotAccessible,
     TypeAliasMissingType,
     AliasCycle,
     UnexpectedTypeBounds,
+    PatternTypeMismatch(String),
+    PatternDuplicateBinding,
+    PatternBindingWrongType(String, String),
+    PatternBindingNotDefinedInAllAlternatives(String),
+    PatternUnexpectedRest,
+    PatternMultipleRest,
+    PatternRestShouldBeLast,
+    ExtendingTypeDifferentPackage,
+    ImplTraitForeignType,
+    TraitNotObjectSafe,
+    UnexpectedTypeBinding,
+    TypeBindingOrder,
+    UnknownTypeBinding,
+    DuplicateTypeBinding,
+    MissingTypeBinding(String),
+    ExpectedTypeName,
+    UnknownAssoc,
+    UnexpectedAssoc,
+    UnexpectedWhere,
+    UnexpectedPositionalArgument,
+    UnexpectedNamedArgument,
+    DuplicateNamedArgument,
+    MissingNamedArgument(String),
+    UseOfUnknownArgument,
+    CallRequiresNamedArgument,
+    WrongTypeForArgument(String, String),
+    SuperfluousArgument,
+    MissingArguments(usize, usize),
+    FieldShouldBeUnnamed,
+    OldClassDefinition,
+    ExpectedNamedPattern,
+    IndexGetNotImplemented(String),
+    IndexSetNotImplemented(String),
+    IndexGetAndIndexSetDoNotMatch,
+    MissingAssocType(String),
+    NameBoundMultipleTimesInParams(String),
 }
 
 impl ErrorMessage {
@@ -194,26 +228,21 @@ impl ErrorMessage {
         match *self {
             ErrorMessage::Unimplemented => format!("feature not implemented yet."),
             ErrorMessage::UnknownClass(ref name) => format!("class `{}` does not exist.", name),
-            ErrorMessage::UnknownType(ref name) => format!("type `{}` does not exist.", name),
             ErrorMessage::UnknownIdentifier(ref name) => format!("unknown identifier `{}`.", name),
             ErrorMessage::UnknownStruct(ref name) => format!("unknown struct `{}`.", name),
             ErrorMessage::UnknownFunction(ref name) => format!("unknown function `{}`", name),
-            ErrorMessage::UnknownMethod(ref cls, ref name, ref args) => {
-                let args = args.join(", ");
-                format!(
-                    "no method with definition `{}({})` in type `{}`.",
-                    name, args, cls
-                )
+            ErrorMessage::UnknownType(ref name) => format!("unknown type `{}`", name),
+            ErrorMessage::UnknownMethod(ref cls, ref name) => {
+                format!("no method with name `{}` in type `{}`.", name, cls)
             }
             ErrorMessage::UnknownEnumVariant(ref name) => {
                 format!("no variant with name `{}` in enumeration.", name)
             }
             ErrorMessage::UnknownSuffix => "unknown integer suffix".into(),
-            ErrorMessage::MultipleCandidatesForMethod(ref cls, ref name, ref args) => {
-                let args = args.join(", ");
+            ErrorMessage::MultipleCandidatesForMethod(ref cls, ref name) => {
                 format!(
-                    "multiple candidates for definition `{}({})` in class `{}`.",
-                    name, args, cls
+                    "multiple candidates for method named `{}` in type `{}`.",
+                    name, cls
                 )
             }
             ErrorMessage::VariadicParameterNeedsToBeLast => {
@@ -231,9 +260,8 @@ impl ErrorMessage {
             ErrorMessage::UnknownStaticMethodWithTypeParam => {
                 "no static method with this name found for type param.".into()
             }
-            ErrorMessage::UnknownStaticMethod(ref cls, ref name, ref args) => {
-                let args = args.join(", ");
-                format!("no static method `{}::{}({})`.", cls, name, args)
+            ErrorMessage::UnknownStaticMethod(ref cls, ref name) => {
+                format!("no static method of name `{}` for type `{}`.", name, cls,)
             }
             ErrorMessage::UnexpectedTypeAliasAssignment => "no type expected.".into(),
             ErrorMessage::UnknownCtor => "class does not have constructor.".into(),
@@ -301,27 +329,35 @@ impl ErrorMessage {
                     struct_, def, struct_, expr
                 )
             }
-            ErrorMessage::StructFieldImmutable => {
-                format!("struct fields are not mutable.")
+            ErrorMessage::ImmutableField => {
+                format!("Fields of this type are immutable.")
             }
-            ErrorMessage::EnumArgsNoParens(ref name, ref variant) => {
-                format!("{}::{} needs to be used without parens.", name, variant)
+            ErrorMessage::UnexpectedArgumentsForEnumVariant => {
+                format!("Enum variant does not have any arguments")
             }
-            ErrorMessage::MatchPatternNoParens => "pattern should be used without parens.".into(),
-            ErrorMessage::MatchPatternWrongNumberOfParams(given_params, expected_params) => {
+            ErrorMessage::EnumVariantMissingArguments => {
+                format!("Fields missing for enum variant.")
+            }
+            ErrorMessage::PatternNoParens => "pattern should be used without parens.".into(),
+            ErrorMessage::PatternWrongNumberOfParams(given_params, expected_params) => {
                 format!(
                     "pattern expects {} params but got {}.",
                     given_params, expected_params
                 )
             }
-            ErrorMessage::VarAlreadyInPattern => "var is already used in pattern.".into(),
             ErrorMessage::EnumExpected => format!("enum expected."),
             ErrorMessage::EnumMismatch(ref value, ref pattern) => {
                 format!("value of type {} but pattern of type {}.", value, pattern)
             }
             ErrorMessage::EnumVariantExpected => format!("enum variant expected."),
-            ErrorMessage::MatchUncoveredVariant => "not all variants are covered.".into(),
-            ErrorMessage::MatchUnreachablePattern => "unreachable pattern.".into(),
+            ErrorMessage::NonExhaustiveMatch(ref patterns) => {
+                let missing = patterns.join(", ");
+                format!(
+                    "`match` does not cover all possible values. Missing patterns: {}",
+                    missing
+                )
+            }
+            ErrorMessage::UselessPattern => "unreachable pattern.".into(),
             ErrorMessage::VarNeedsTypeOrExpression => {
                 format!("variable needs either type declaration or expression.")
             }
@@ -352,10 +388,9 @@ impl ErrorMessage {
             ),
             ErrorMessage::LvalueExpected => format!("lvalue expected for assignment"),
             ErrorMessage::ValueExpected => format!("value expected"),
-            ErrorMessage::AssignType(ref name, ref def, ref expr) => format!(
-                "cannot assign `{}` to variable `{}` of type `{}`.",
-                expr, name, def
-            ),
+            ErrorMessage::AssignType(ref def, ref expr) => {
+                format!("cannot assign `{}` to variable of type `{}`.", expr, def)
+            }
             ErrorMessage::AssignField(ref name, ref cls, ref def, ref expr) => format!(
                 "cannot assign `{}` to field `{}`.`{}` of type `{}`.",
                 expr, cls, name, def
@@ -388,7 +423,7 @@ impl ErrorMessage {
                 format!("`{}` is not a trait.", name)
             }
             ErrorMessage::NoSuperModule => "no super module.".into(),
-            ErrorMessage::NotAccessible(ref name) => format!("`{}` is not accessible.", name),
+            ErrorMessage::NotAccessible => format!("element is not accessible."),
             ErrorMessage::StructConstructorNotAccessible(ref name) => {
                 format!("constructor of struct `{}` is not accessible.", name)
             }
@@ -457,11 +492,13 @@ impl ErrorMessage {
             ErrorMessage::ExpectedSomeIdentifier => "identifier expected.".into(),
             ErrorMessage::ExpectedModule => "module expected.".into(),
             ErrorMessage::ExpectedPath => "path expected.".into(),
-            ErrorMessage::LetPatternExpectedTuple(ref ty) => {
+            ErrorMessage::PatternTupleExpected(ref ty) => {
                 format!("tuple expected but got type {}.", ty)
             }
-            ErrorMessage::LetPatternShouldBeUnit => format!("let pattern should be unit."),
-            ErrorMessage::LetPatternExpectedTupleWithLength(ref ty, ty_length, pattern_length) => {
+            ErrorMessage::WrongType(ref expected, ref got) => {
+                format!("{} expected but got type {}.", expected, got)
+            }
+            ErrorMessage::PatternTupleLengthMismatch(ref ty, ty_length, pattern_length) => {
                 format!(
                     "tuple {} has {} elements but pattern has {}.",
                     ty, ty_length, pattern_length
@@ -538,11 +575,9 @@ impl ErrorMessage {
             ErrorMessage::StaticMethodCallTargetExpected => {
                 "expected static method call target.".into()
             }
-            ErrorMessage::ExpectedImplTraitType => "cannot implement trait for this type.".into(),
-            ErrorMessage::ExpectedImplType => "cannot use this type in `impl` block".into(),
+            ErrorMessage::ExpectedExtensionType => "cannot extend this type.".into(),
             ErrorMessage::BoundExpected => "class or trait bound expected".into(),
             ErrorMessage::NoTypeParamsExpected => "no type params allowed".into(),
-            ErrorMessage::DuplicateTraitBound => "duplicate trait bound".into(),
             ErrorMessage::TypeNotImplementingTrait(ref name, ref trait_) => {
                 format!("type `{}` does not implement trait `{}`.", name, trait_)
             }
@@ -626,7 +661,7 @@ impl ErrorMessage {
             ErrorMessage::InvalidReturn => {
                 format!("`return` cannot be used in this context.")
             }
-            ErrorMessage::MatchMultiplePatternsWithParamsNotSupported => {
+            ErrorMessage::PatternAltWithBindingUnsupported => {
                 format!("Multiple patterns with arguments in a `match` arm are currently not supported.")
             }
             ErrorMessage::UseNotAccessible => format!("`use` not accessible."),
@@ -636,6 +671,100 @@ impl ErrorMessage {
             }
             ErrorMessage::AliasCycle => "Alias cycle detected.".into(),
             ErrorMessage::UnexpectedTypeBounds => "unexepcted type bounds.".into(),
+            ErrorMessage::PatternTypeMismatch(ref ty) => {
+                format!("Pattern does not match type {}", ty)
+            }
+            ErrorMessage::PatternDuplicateBinding => format!("duplicate binding in pattern."),
+            ErrorMessage::PatternBindingWrongType(ref ty, ref expected_ty) => {
+                format!("binding has type {} but type {} expected.", ty, expected_ty)
+            }
+            ErrorMessage::PatternBindingNotDefinedInAllAlternatives(ref name) => {
+                format!("binding `{}` not defined in all bindings", name)
+            }
+            ErrorMessage::PatternUnexpectedRest => format!("Rest pattern is not allowed here."),
+            ErrorMessage::PatternMultipleRest => {
+                format!("Rest pattern is only allowed once but used multiple times.")
+            }
+            ErrorMessage::ExtendingTypeDifferentPackage => {
+                format!("Can not extend types defined in another package.")
+            }
+            ErrorMessage::ImplTraitForeignType => {
+                format!("Cannot implement foreign trait for a type of another package.")
+            }
+            ErrorMessage::TraitNotObjectSafe => format!("Trait not object safe"),
+            ErrorMessage::UnexpectedTypeBinding => format!("Type binding not allowed here."),
+            ErrorMessage::UnknownTypeBinding => format!("Type binding not allowed here."),
+            ErrorMessage::TypeBindingOrder => {
+                format!("Generic arguments should be ordered before type bindings.")
+            }
+            ErrorMessage::DuplicateTypeBinding => {
+                format!("Type binding for this name already exists.")
+            }
+            ErrorMessage::MissingTypeBinding(ref name) => {
+                format!("Missing type binding `{}`.", name)
+            }
+            ErrorMessage::ExpectedTypeName => format!("Type name expected."),
+            ErrorMessage::UnknownAssoc => format!("Unknown associated type."),
+            ErrorMessage::UnexpectedAssoc => format!("No associated types in this context."),
+            ErrorMessage::UnexpectedWhere => format!("Where clauses not allowed here."),
+            ErrorMessage::UnexpectedNamedArgument => format!("Named argument not expected here."),
+            ErrorMessage::UnexpectedPositionalArgument => {
+                format!("Positional argument not allowed anymore after named argument.")
+            }
+            ErrorMessage::DuplicateNamedArgument => {
+                format!("Named argument with that name already exists.")
+            }
+            ErrorMessage::MissingNamedArgument(ref name) => {
+                format!("Named argument `{}` is missing.", name)
+            }
+            ErrorMessage::UseOfUnknownArgument => {
+                format!("Named argument with this name does not exist.")
+            }
+            ErrorMessage::CallRequiresNamedArgument => {
+                format!("Call requires named arguments.")
+            }
+            ErrorMessage::WrongTypeForArgument(ref exp, ref got) => {
+                format!(
+                    "Argument expects value of type `{}` but got `{}`.",
+                    exp, got
+                )
+            }
+            ErrorMessage::SuperfluousArgument => {
+                format!("Superfluous argument.")
+            }
+            ErrorMessage::MissingArguments(expected, got) => {
+                format!(
+                    "Call should have {} arguments but got only {}.",
+                    expected, got
+                )
+            }
+            ErrorMessage::FieldShouldBeUnnamed => {
+                format!("Field access should be unnamed.")
+            }
+            ErrorMessage::OldClassDefinition => {
+                format!("Switch code to new class definition syntax.")
+            }
+            ErrorMessage::PatternRestShouldBeLast => {
+                format!("Rest pattern should be last.")
+            }
+            ErrorMessage::ExpectedNamedPattern => {
+                format!("Expected named pattern field.")
+            }
+            ErrorMessage::IndexGetNotImplemented(ref ty) => {
+                format!("Type `{}` does not implement trait IndexGet.", ty)
+            }
+            ErrorMessage::IndexSetNotImplemented(ref ty) => {
+                format!("Type `{}` does not implement trait IndexGet.", ty)
+            }
+            ErrorMessage::IndexGetAndIndexSetDoNotMatch => {
+                format!("`IndexGet` and `IndexSet` do not match for both `Index` and `Item`.")
+            }
+            ErrorMessage::MissingAssocType(ref name) => {
+                format!("Missing associated type `{}`.", name)
+            }
+            ErrorMessage::NameBoundMultipleTimesInParams(ref name) => {
+                format!("Name `{}` bound multiple times in parameter list.", name)
+            }
         }
     }
 }

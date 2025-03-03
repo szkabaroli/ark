@@ -1,0 +1,16 @@
+struct test_test {
+    a: bool
+}
+
+main: fn() -> test_test {
+    let a: bool = false;
+    let b = test_test { a: a };
+    print(b);
+    return b;
+}
+
+// Builtins
+struct bool
+struct int32
+struct int64
+struct float64

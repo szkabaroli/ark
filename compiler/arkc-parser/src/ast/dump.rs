@@ -72,7 +72,7 @@ impl AstDumper {
 
     fn dump_global(&mut self, global: &GlobalItem) {
         dump!(self, "global @ {} {}", global.span, global.id);
-        self.dump_ident(&global.name);
+        self.dump_maybe_ident(&global.name);
 
         //self.indent(|d| {
         //    d.dump_type(&global.data_type);
@@ -170,7 +170,7 @@ impl AstDumper {
 
     fn dump_struct(&mut self, struc: &StructItem) {
         dump!(self, "struct @ {} {}", struc.span, struc.id);
-        self.dump_ident(&struc.name);
+        self.dump_maybe_ident(&struc.name);
 
         self.indent(|d| {
             for field in &struc.fields {
@@ -181,7 +181,7 @@ impl AstDumper {
 
     fn dump_struct_field(&mut self, field: &StructField) {
         dump!(self, "field @ {} {}", field.span, field.id);
-        self.dump_ident(&field.name);
+        self.dump_maybe_ident(&field.name);
         self.indent(|d| d.dump_type(&field.ty));
     }
 
@@ -225,12 +225,12 @@ impl AstDumper {
 
     fn dump_interface(&mut self, interface: &InterfaceItem) {
         dump!(self, "interface @ {} {}", interface.span, interface.id);
-        self.dump_ident(&interface.name);
+        self.dump_maybe_ident(&interface.name);
     }
 
     fn dump_function(&mut self, fct: &FnItem) {
         dump!(self, "function @ {} {}", fct.span, fct.id);
-        self.dump_ident(&fct.name);
+        self.dump_maybe_ident(&fct.name);
 
         self.indent(|d| {
             dump!(d, "params");
@@ -262,8 +262,7 @@ impl AstDumper {
 
     fn dump_param(&mut self, param: &Param) {
         dump!(self, "param @ {} {}", param.span, param.id);
-        self.dump_ident(&param.name);
-
+        self.dump_type(&param.data_type);
         self.indent(|d| d.dump_type(&param.data_type));
     }
 
@@ -539,7 +538,7 @@ impl AstDumper {
         self.indent(|d| d.dump_expr(&expr.lhs));
     }
 
-    fn dump_expr_call(&mut self, expr: &Call) {
+    fn dump_expr_call(&mut self, expr: &ExprCallType) {
         dump!(self, "call @ {} {}", expr.span, expr.id);
 
         self.indent(|d| {
@@ -547,7 +546,10 @@ impl AstDumper {
             d.indent(|d| d.dump_expr(&expr.callee));
 
             for arg in &expr.args {
-                d.dump_expr(arg);
+                if let Some(ref name) = arg.name {
+                    d.dump_ident(name);
+                }
+                d.dump_expr(&arg.expr);
             }
         });
     }
@@ -583,12 +585,16 @@ impl AstDumper {
         });
     }*/
 
-    fn dump_ident(&self, ident: &Option<Ident>) {
+    fn dump_maybe_ident(&self, ident: &Option<Ident>) {
         if let Some(ident) = ident {
             dump!(self, "ident {}", ident.name_as_string);
         } else {
             dump!(self, "missing ident");
         }
+    }
+
+    fn dump_ident(&self, ident: &Ident) {
+        dump!(self, "ident {}", ident.name_as_string);
     }
 
     fn indent<F>(&mut self, fct: F)

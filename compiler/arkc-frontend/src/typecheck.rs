@@ -1,3 +1,4 @@
+mod call;
 mod expr;
 mod function;
 mod literals;
@@ -6,11 +7,12 @@ mod stmt;
 use crate::sym::SymbolKind;
 use crate::{compilation::ModuleId, sym::ModuleSymTable};
 use crate::{report_sym_shadow_span, Sema};
-use arkc_hir::hir::NodeMap;
 use arkc_hir::{hir, ty};
 use function::VarManager;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
+pub use call::check_expr_call;
 pub use function::TypeCheck;
 
 pub fn returns_value(statement: &hir::Statement) -> Result<(), ()> {
@@ -79,7 +81,7 @@ impl<'a> TypecheckingContext<'a> {
         let (mut types, mut analysis_map) = {
             let root = &self.sa.compilation.hir.borrow()[0];
             let mut types = BTreeMap::new();
-            let mut analysis_map = NodeMap::new();
+            let mut analysis_map = hir::NodeMap::new();
 
             for item in root.elements.iter() {
                 match &item.kind {
@@ -87,6 +89,7 @@ impl<'a> TypecheckingContext<'a> {
                         let mut analysis = hir::AnalysisData {
                             idents: hir::NodeMap::new(),
                             map_vars: hir::NodeMap::new(),
+                            map_calls: hir::NodeMap::new(),
                             int_literals: hir::NodeMap::new(),
                             vars: hir::VarAccess::new(vec![]),
                         };
@@ -111,6 +114,7 @@ impl<'a> TypecheckingContext<'a> {
     fn check_fn_declaration(
         &mut self,
         analysis: &mut hir::AnalysisData,
+
         types: &mut BTreeMap<hir::HirId, ty::Type>,
         func_ty: &ty::Type,
         func: &hir::FnDeclaration,
@@ -138,4 +142,9 @@ impl<'a> TypecheckingContext<'a> {
 
         typeck.check_function(&func);
     }
+}
+
+pub struct CallArguments {
+    arguments: Vec<Arc<hir::Argument>>,
+    //span: ast::Span,
 }

@@ -101,8 +101,6 @@ pub fn walk_field_value<V: Visitor>(v: &mut V, f: &FieldValue) {
     v.visit_expr(&f.value);
 }
 
-
-
 //pub fn walk_flow<V: Visitor>(v: &mut V, f: &Flow) {
 //    for p in &f.params {
 //        v.visit_param(p);
@@ -169,19 +167,17 @@ pub fn walk_expr<V: Visitor>(v: &mut V, e: &Expr) {
         //ExprKind::Un(ref value) => {
         //    v.visit_expr(&value.opnd);
         //}
-
-        //ExprKind::Bin(_, ref lhs, ref rhs) => {
-        //    v.visit_expr(lhs);
-        //    v.visit_expr(rhs);
-        //}
+        ExprKind::Bin(_, ref lhs, ref rhs) => {
+            v.visit_expr(lhs);
+            v.visit_expr(rhs);
+        }
         ExprKind::Call(ref call) => {
             //v.visit_expr(&call.callee);
 
             for arg in &call.args {
-                v.visit_expr(arg);
+                v.visit_expr(&arg.expr);
             }
         }
-
         //ExprData::TypeParam(ref expr) => {
         //    v.visit_expr(&expr.callee);
 
@@ -189,10 +185,10 @@ pub fn walk_expr<V: Visitor>(v: &mut V, e: &Expr) {
         //        v.visit_type(arg);
         //    }
         //}
-        //ExprKind::Path(ref path) => {
+        ExprKind::Path(ref path) => {
         //    v.visit_expr(&path.lhs);
         //    v.visit_expr(&path.rhs);
-        //}
+        }
         ExprKind::Dot(ref value) => {
             //v.visit_expr(&value.lhs);
             //v.visit_expr(&value.rhs);

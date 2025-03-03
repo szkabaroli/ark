@@ -1,10 +1,8 @@
-use crate::{error::ErrorMessage, sym::SymbolKind, Sema};
-use arkc_hir::{
-    hir::{self, HirId},
-    ty,
-};
+use crate::{error::ErrorMessage, operator_registry::Operator, sym::SymbolKind, Sema};
+use arkc_hir::{hir, ty};
 
 use super::{
+    check_expr_call,
     literals::{check_lit_float, check_lit_int},
     TypeCheck,
 };
@@ -16,17 +14,93 @@ pub(super) fn check_expr(
 ) -> ty::Type {
     let ty = match *expr.kind {
         hir::ExprKind::Lit(ref lit) => check_expr_literal(ck, lit, expected_ty),
-        hir::ExprKind::Call(ref call) => check_expr_call(ck, call),
+        hir::ExprKind::Call(ref call) => check_expr_call(ck, call, expected_ty),
         hir::ExprKind::Struct(ref stru) => check_expr_struct(ck, stru, expected_ty),
         hir::ExprKind::Return(ref expr) => check_expr_return(ck, expr, expected_ty),
         hir::ExprKind::Ident(ref ident) => check_expr_ident(ck, ident, expected_ty),
+        hir::ExprKind::Bin(ref op, ref lhs, ref rhs) => {
+            check_expr_bin(ck, op, lhs, rhs, expected_ty)
+        }
         hir::ExprKind::Block(_) => todo!(),
         hir::ExprKind::Dot(_) => todo!(),
+        hir::ExprKind::Path(_) => todo!(),
     };
 
     ck.types.insert(expr.hir_id.clone(), ty.clone());
 
     ty
+}
+
+fn check_expr_bin_bool(
+    ck: &mut TypeCheck,
+    op: &hir::BinOp,
+    lhs_type: ty::Type,
+    rhs_type: ty::Type,
+) -> ty::Type {
+    check_type(
+        ck,
+        op,
+        op.kind,
+        lhs_type,
+        rhs_type,
+        ty::Type::Primitive(ty::PrimitiveType::Bool),
+    );
+    //ck.analysis.set_ty(e.id, ty::Type::Primitive(ty::PrimitiveType::Bool));
+
+    ty::Type::Primitive(ty::PrimitiveType::Bool)
+}
+
+pub(super) fn check_expr_bin(
+    ck: &mut TypeCheck,
+    op: &hir::BinOp,
+    lhs: &hir::Expr,
+    rhs: &hir::Expr,
+    _expected_ty: Box<ty::Type>,
+) -> ty::Type {
+    //if op.is_any_assign() {
+    //    check_expr_assign(ck, e);
+    //    return ty::Type::Primitive(ty::PrimitiveType::Unit);
+    //}
+
+    let lhs_type = check_expr(ck, lhs, Box::new(ty::Type::Any));
+    let rhs_type = check_expr(ck, rhs, Box::new(ty::Type::Any));
+
+    match op.kind {
+        hir::BinOpKind::Or | hir::BinOpKind::And => check_expr_bin_bool(ck, op, lhs_type, rhs_type),
+        //hir::BinOpKind::Cmp(cmp) => check_expr_bin_cmp(ck, e, cmp, lhs_type, rhs_type),
+        hir::BinOpKind::Add => check_operator_overload(ck, op, lhs_type, rhs_type),
+        hir::BinOpKind::Sub => check_operator_overload(ck, op, lhs_type, rhs_type),
+        hir::BinOpKind::Mul => check_operator_overload(ck, op, lhs_type, rhs_type),
+        hir::BinOpKind::Div => check_operator_overload(ck, op, lhs_type, rhs_type),
+        _ => unimplemented!(),
+    }
+}
+
+fn check_operator_overload(
+    ck: &mut TypeCheck,
+    op: &hir::BinOp,
+    //trait_id: TraitDefinitionId,
+    //trait_method_name: &str,
+    lhs_type: ty::Type,
+    rhs_type: ty::Type,
+) -> ty::Type {
+    if let Some(operator) = ck.sa.operators.lookup(&op.kind, &lhs_type, &rhs_type) {
+        if let Operator::BuiltIn(return_ty) = operator {
+            return return_ty;
+        } else {
+            todo!("operator overloads")
+        }
+    } else {
+        let lhs_type = ck.ty_name(&lhs_type);
+        let rhs_type = ck.ty_name(&rhs_type);
+        let msg = ErrorMessage::BinOpType(op.kind.as_str().into(), lhs_type, rhs_type);
+
+        panic!("error: {:?}", msg);
+        //ck.sa.report(ck.file_id, e.span, msg);
+        //ck.analysis.set_ty(e.id, ty::Type::Error);
+
+        ty::Type::Error
+    }
 }
 
 fn check_expr_ident(
@@ -54,13 +128,13 @@ fn check_expr_ident(
             //    e.span,
             //    ErrorMessage::UnknownIdentifier(e.name.clone()),
             //);
-            ty::Type::Unknown
+            ty::Type::Error
         }
         _ => {
             panic!("{:?}", ErrorMessage::ValueExpected);
 
             //ck.sa.report(ck.file_id, e.span, ErrorMessage::ValueExpected);
-            ty::Type::Unknown
+            ty::Type::Error
         }
     };
 
@@ -95,10 +169,6 @@ pub(super) fn check_expr_literal(
         hir::LiteralKind::Char(_) => todo!(),
         hir::LiteralKind::Unit => todo!(),
     }
-}
-
-pub(super) fn check_expr_call(ck: &mut TypeCheck, expr: &hir::FnCall) -> ty::Type {
-    ty::Type::Primitive(ty::PrimitiveType::Unit)
 }
 
 pub(super) fn check_field_value(ck: &mut TypeCheck, fv: &hir::FieldValue) -> ty::Type {
@@ -145,10 +215,75 @@ pub(super) fn check_expr_return(
 
         ck.check_fn_return_type(expected_ty, expr_type);
     } else {
-        panic!("error");
+        panic!("error {:?}", ErrorMessage::InvalidReturn);
         // ck.sa.report(expr.span, ErrorMessage::InvalidReturn);
         // check_expr(ck, expr.as_ref(), ty::Type::Any);
     }
 
     ty::Type::Primitive(ty::PrimitiveType::Unit)
+}
+
+pub(super) fn check_type(
+    ck: &mut TypeCheck,
+    e: &hir::BinOp,
+    op: hir::BinOpKind,
+    lhs_type: ty::Type,
+    rhs_type: ty::Type,
+    expected_type: ty::Type,
+) {
+    if !expected_type.allows(lhs_type.clone()) || !expected_type.allows(rhs_type.clone()) {
+        let op = op.as_str().into();
+        let lhs_type = ck.ty_name(&lhs_type);
+        let rhs_type = ck.ty_name(&rhs_type);
+        let msg = ErrorMessage::BinOpType(op, lhs_type, rhs_type);
+
+        panic!("error {:?}", msg);
+        //ck.sa.report(e.span, msg);
+    }
+}
+
+pub(super) fn read_path_expr(
+    ck: &mut TypeCheck,
+    expr: &hir::Expr,
+) -> Result<Option<SymbolKind>, ()> {
+    if let Some(expr_path) = expr.to_path() {
+        let sym = read_path_expr(ck, &expr_path.lhs)?;
+
+        let element_name = if let Some(ident) = expr_path.rhs.to_ident() {
+            ident.name.clone()
+        } else {
+            let msg = ErrorMessage::ExpectedSomeIdentifier;
+            println!("{:?}", msg);
+            //ck.sa.report(ck.file_id, expr_path.rhs.span(), msg);
+            return Err(());
+        };
+
+        let interned_element_name = ck.sa.interner.intern(&element_name);
+
+        match sym {
+            Some(SymbolKind::Module(module_id)) => {
+                let module = ck.sa.module(module_id);
+                let symtable = module.table();
+                let sym = symtable.get(interned_element_name);
+
+                Ok(sym)
+            }
+
+            _ => {
+                let msg = ErrorMessage::ExpectedModule;
+                println!("{:?}", msg);
+                //ck.sa.report(ck.file_id, expr.span(), msg);
+                Err(())
+            }
+        }
+    } else if let Some(expr_ident) = expr.to_ident() {
+        let sym = ck.symtable.get_string(ck.sa, &expr_ident.name);
+
+        Ok(sym)
+    } else {
+        let msg = ErrorMessage::ExpectedSomeIdentifier;
+        println!("{:?}", msg);
+        //ck.sa.report(ck.file_id, expr.span(), msg);
+        Err(())
+    }
 }

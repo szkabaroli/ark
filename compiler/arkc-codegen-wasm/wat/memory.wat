@@ -1,11 +1,14 @@
 (module
-  (memory (export "memory") 1) ;; 64KiB memory
+  (type $grow_memory (func))
+  
+  (memory (export "memory") 1) ;; 1 page (64KiB) memory
+  
   (global $heap_ptr (mut i32) (i32.const 8)) ;; Start heap at 8 (first 8 bytes reserved)
   (global $heap_end (mut i32) (i32.const 65536)) ;; End of first page (64KiB)
   (global $freelist (mut i32) (i32.const 0)) ;; Head of free list (nullptr)
   
   ;; Grow memory by 64KiB
-  (func $grow_memory
+  (func $grow_memory (type $grow_memory)
     (memory.grow (i32.const 1))
     (if (i32.eq (i32.const -1))
       (then
@@ -19,7 +22,7 @@
   )
 
   ;; Allocate memory
-  (func (export "allocate") (param $size i32) (result i32)
+  (func $allocate (export "allocate") (param $size i32) (result i32)
     (local $ptr i32)
     (local $prev i32)
     (local $block_size i32)
@@ -109,7 +112,7 @@
   )
 
   ;; Free memory
-  (func (export "free") (param $ptr i32) (param $size i32)
+  (func $free (export "free") (param $ptr i32) (param $size i32)
     ;; Store block size
     (local.get $ptr)
     (local.get $size)
@@ -125,12 +128,12 @@
   )
 
   ;; Store value at address
-  (func (export "store_i32") (param $addr i32) (param $value i32)
+  (func $store_i32 (export "store_i32") (param $addr i32) (param $value i32)
     (i32.store (local.get $addr) (local.get $value))
   )
 
   ;; Load value from address
-  (func (export "load_i32") (param $addr i32) (result i32)
+  (func $load_i32 (export "load_i32") (param $addr i32) (result i32)
     (i32.load (local.get $addr))
   )
 )

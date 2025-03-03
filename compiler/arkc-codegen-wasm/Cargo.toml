@@ -9,6 +9,7 @@ arkc-frontend = {path = "../arkc-frontend"}
 arkc-hir = {path = "../arkc-hir"}
 parser = {path = "../arkc-parser"}
 wasm-encoder = {version = "0.226.0"}
+wasmparser = {version = "0.226.0"}
 
 [profile.release]
 lto = true

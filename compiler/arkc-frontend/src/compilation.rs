@@ -1,6 +1,10 @@
 mod modules;
 
-use std::{cell::{OnceCell, RefCell}, collections::HashMap, sync::Arc};
+use std::{
+    cell::{OnceCell, RefCell},
+    collections::HashMap,
+    sync::Arc,
+};
 
 use arkc_hir::hir;
 use id_arena::Arena;

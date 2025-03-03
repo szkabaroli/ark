@@ -186,7 +186,7 @@ pub fn walk_expr<V: Visitor>(v: &mut V, e: &ExprKind) {
             v.visit_expr(&call.callee);
 
             for arg in &call.args {
-                v.visit_expr(arg);
+                v.visit_expr(&arg.expr);
             }
         }
 

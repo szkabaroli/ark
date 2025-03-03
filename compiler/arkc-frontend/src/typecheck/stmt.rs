@@ -32,7 +32,7 @@ fn check_stmt_let(ck: &mut TypeCheck, binding: &hir::LetBinding) {
         expr_type.clone()
     };
 
-    if !defined_type.is_unknown() && !defined_type.is_defined_type() {
+    if !defined_type.is_error() && !defined_type.is_defined_type() {
         panic!("{:?}", ErrorMessage::VarNeedsTypeOrExpression);
         //ck.sa.report( s.span, ErrorMessage::VarNeedsTypeOrExpression);
         return;
@@ -42,14 +42,13 @@ fn check_stmt_let(ck: &mut TypeCheck, binding: &hir::LetBinding) {
     check_let_pattern(ck, &binding.pattern, defined_type.clone());
 
     if binding.expr.is_some() {
-        if !expr_type.is_unknown()
-            && !defined_type.is_unknown()
+        if !expr_type.is_error()
+            && !defined_type.is_error()
             && !defined_type.allows(expr_type.clone())
         {
-            let name = binding.pattern.to_name().unwrap();
             let defined_type = ck.ty_name(&defined_type);
             let expr_type = ck.ty_name(&expr_type);
-            let msg = ErrorMessage::AssignType(name, defined_type, expr_type);
+            let msg = ErrorMessage::AssignType(defined_type, expr_type);
 
             panic!("{:?}", msg);
             //ck.sa.report( s.span, msg);

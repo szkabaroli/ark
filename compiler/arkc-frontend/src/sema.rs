@@ -1,12 +1,13 @@
 use std::{cell::RefCell, path::PathBuf};
 
-use id_arena::Arena;
+use arkc_hir::{hir::HirId, ty};
 use parser::Span;
 
 use crate::{
     compilation::{Compilation, Module, ModuleId},
     error::{diag::Diagnostic, msg::ErrorMessage},
     interner::Interner,
+    operator_registry::OperatorRegistry,
 };
 
 pub struct SemaArgs {
@@ -17,6 +18,7 @@ pub struct SemaArgs {
 pub struct Sema {
     pub args: SemaArgs,
     pub interner: Interner,
+    pub operators: OperatorRegistry,
     pub diag: RefCell<Diagnostic>,
     pub compilation: Compilation,
 }
@@ -35,6 +37,7 @@ impl Sema {
         Sema {
             args,
             interner: Interner::new(),
+            operators: OperatorRegistry::new(),
             diag: RefCell::new(Diagnostic::new()),
             compilation: Compilation::new(),
         }

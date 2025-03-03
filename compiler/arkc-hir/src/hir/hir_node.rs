@@ -1,9 +1,11 @@
 use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
 use crate::hir_map::HirMap;
-use crate::ty::{PrimitiveType, Type};
+use crate::parsety;
+use crate::ty::{self, PrimitiveType, Type};
 
 use super::{FnBodyId, HirId};
 
@@ -48,6 +50,20 @@ pub enum IdentType {
     Var(VarId),
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum CallType {
+    // Function calls, e.g. func(<args>) or Class.static_func(<args>).
+    Func(HirId, ty::TypeArray),
+}
+
+impl CallType {
+    pub fn func_id(&self) -> Option<HirId> {
+        match *self {
+            CallType::Func(func_id, _) => Some(func_id),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Var {
     pub ty: Type,
@@ -81,6 +97,7 @@ impl VarAccess {
 pub struct AnalysisData {
     pub idents: NodeMap<IdentType>,
     pub map_vars: NodeMap<VarId>,
+    pub map_calls: NodeMap<Arc<CallType>>,
     pub int_literals: NodeMap<i64>,
     pub vars: VarAccess,
 }
@@ -210,6 +227,7 @@ pub struct FnDeclaration {
     pub body_id: FnBodyId,
     pub hir_id: HirId,
     pub signature: FnType,
+    pub return_type: parsety::ParsedType
 }
 
 impl FnDeclaration {
@@ -224,6 +242,14 @@ impl FnDeclaration {
                 }
             }
         }
+    }
+
+    pub fn return_type(&self) -> ty::Type {
+        self.parsed_return_type().ty()
+    }
+
+    pub fn parsed_return_type(&self) -> &parsety::ParsedType {
+        &self.return_type
     }
 }
 
@@ -336,6 +362,20 @@ impl Expr {
         }
     }
 
+    pub fn to_dot(&self) -> Option<&Dot> {
+        match *self.kind {
+            ExprKind::Dot(ref val) => Some(val),
+            _ => None,
+        }
+    }
+
+    pub fn to_path(&self) -> Option<&ExprPath> {
+        match *self.kind {
+            ExprKind::Path(ref val) => Some(val),
+            _ => None,
+        }
+    }
+
     pub fn is_return(&self) -> bool {
         if let ExprKind::Return(_) = &*self.kind {
             true
@@ -360,6 +400,13 @@ pub struct ExprStruct {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExprPath {
+    pub hir_id: HirId,
+    pub rhs: Expr,
+    pub lhs: Expr,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ExprKind {
     Block(Block),
     Struct(ExprStruct),
@@ -367,7 +414,67 @@ pub enum ExprKind {
     Ident(Identifier),
     Call(FnCall),
     Dot(Dot),
+    Path(ExprPath),
+    Bin(BinOp, Expr, Expr),
     Return(Option<Expr>),
+}
+
+#[derive(PartialEq, Eq, Debug, Copy, Clone, Hash, Serialize, Deserialize)]
+pub enum BinOpKind {
+    Assign,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    //Cmp(CmpOp),
+    Or,
+    And,
+    BitOr,
+    BitAnd,
+    BitXor,
+    ShiftL,
+    ArithShiftR,
+    LogicalShiftR,
+}
+
+impl BinOpKind {
+    pub fn as_str(&self) -> &'static str {
+        match *self {
+            BinOpKind::Assign => "=",
+            BinOpKind::Add => "+",
+            //BinOpKind::AddAssign => "+=",
+            BinOpKind::Sub => "-",
+            //BinOpKind::SubAssign => "-=",
+            BinOpKind::Mul => "*",
+            //BinOpKind::MulAssign => "*=",
+            BinOpKind::Div => "/",
+            //BinOpKind::DivAssign => "/=",
+            BinOpKind::Mod => "%",
+            //BinOpKind::ModAssign => "%=",
+            //BinOpKind::Cmp(op) => op.as_str(),
+            BinOpKind::Or => "||",
+            BinOpKind::And => "&&",
+            BinOpKind::BitOr => "|",
+            //BinOpKind::BitOrAssign => "|=",
+            BinOpKind::BitAnd => "&",
+            //BinOpKind::BitAndAssign => "&=",
+            BinOpKind::BitXor => "^",
+            //BinOpKind::BitXorAssign => "^=",
+            BinOpKind::ShiftL => "<<",
+            //BinOpKind::ShiftLAssign => "<<=",
+            BinOpKind::ArithShiftR => ">>",
+            //BinOpKind::ArithShiftRAssign => ">>=",
+            BinOpKind::LogicalShiftR => ">>>",
+            //BinOpKind::LogicalShiftRAssign => ">>>=",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BinOp {
+    pub hir_id: HirId,
+    pub kind: BinOpKind,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -377,11 +484,18 @@ pub struct Dot {
     pub value: Identifier,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Argument {
+    pub hir_id: HirId,
+    pub name: Option<Identifier>,
+    pub expr: Expr,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FnCall {
     pub hir_id: HirId,
     pub callee: Expr,
-    pub args: Vec<Expr>
+    pub args: Vec<Arc<Argument>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

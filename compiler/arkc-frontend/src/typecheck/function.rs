@@ -1,9 +1,10 @@
 use std::collections::BTreeMap;
 
 use arkc_hir::hir;
-use arkc_hir::hir::HirId;
-use arkc_hir::hir::NodeMap;
+use arkc_hir::hir::FnDeclaration;
+use arkc_hir::hir::FnDefinition;
 use arkc_hir::ty;
+use parser::ast::Param;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -12,16 +13,14 @@ use crate::error::ErrorMessage;
 use crate::readty::AliasReplacement;
 use crate::readty::AllowSelf;
 use crate::replace_type;
-use crate::report_sym_shadow_span;
 use crate::sym::ModuleSymTable;
-use crate::sym::SymbolKind;
-use crate::Name;
 use crate::Sema;
 
 use super::expr::check_expr;
 use super::expr_returns_value;
 use super::returns_value;
 use super::stmt::check_stmt;
+use super::CallArguments;
 use super::TypecheckingContext;
 
 #[derive(Debug)]
@@ -71,7 +70,10 @@ impl VarManager {
     }
 
     pub fn new() -> Self {
-        Self { vars: vec![], functions: vec![] }
+        Self {
+            vars: vec![],
+            functions: vec![],
+        }
     }
 
     pub fn get_var(&self, idx: hir::NestedVarId) -> &Var {
@@ -274,5 +276,88 @@ impl<'a> TypeCheck<'a> {
 
     pub(super) fn ty_name(&self, ty: &ty::Type) -> String {
         ty.name()
+    }
+}
+
+pub(super) fn check_args_compatible_func<S>(
+    ck: &TypeCheck,
+    callee: &FnDeclaration,
+    args: CallArguments,
+    type_params: &ty::TypeArray,
+    self_ty: Option<ty::Type>,
+    extra_specialization: S,
+) where
+    S: FnMut(ty::Type) -> ty::Type,
+{
+    check_args_compatible(
+        ck,
+        //callee.params.regular_params(),
+        //callee.params.variadic_param(),
+        None,
+        &args,
+        type_params,
+        self_ty,
+        extra_specialization,
+    );
+}
+
+pub(super) fn check_args_compatible<S>(
+    ck: &TypeCheck,
+    //regular_params: &[Param],
+    variadic_param: Option<&Param>,
+    args: &CallArguments,
+    type_params: &ty::TypeArray,
+    self_ty: Option<ty::Type>,
+    mut extra_specialization: S,
+) where
+    S: FnMut(ty::Type) -> ty::Type,
+{
+    for arg in &args.arguments {
+        if let Some(ref name) = arg.name {
+            panic!("{:?}", ErrorMessage::UnexpectedNamedArgument);
+            //ck.sa.report(ck.file_id, name.span, ErrorMessage::UnexpectedNamedArgument);
+        }
+    }
+
+    let no_regular_params = 0; //regular_params.len();
+
+    if args.arguments.len() < no_regular_params {
+        panic!(
+            "{:?}",
+            ErrorMessage::MissingArguments(no_regular_params, args.arguments.len())
+        );
+        //ck.sa.report(ck.file_id, args.span, ErrorMessage::MissingArguments(no_regular_params, args.arguments.len()));
+    } else {
+        if let Some(variadic_param) = variadic_param {
+            /*let variadic_ty = replace_type(
+                ck.sa,
+                variadic_param.ty(),
+                Some(&type_params),
+                self_ty.clone(),
+            );
+
+            for arg in &args.arguments[no_regular_params..] {
+                let arg_ty = ck.analysis.ty(arg.id);
+
+                if !arg_allows(ck.sa, variadic_ty.clone(), arg_ty.clone(), self_ty.clone())
+                    && !arg_ty.is_error()
+                {
+                    let exp = ck.ty_name(&variadic_ty);
+                    let got = ck.ty_name(&arg_ty);
+
+                    println!("{:?}", ErrorMessage::WrongTypeForArgument(exp, got));
+                    //ck.sa.report(
+                    //    ck.file_id,
+                    //    arg.expr.span(),
+                    //    ErrorMessage::WrongTypeForArgument(exp, got),
+                    //);
+                }
+            }*/
+        } else {
+            for arg in &args.arguments[no_regular_params..] {
+                println!("{:?}", ErrorMessage::SuperfluousArgument);
+                //ck.sa.report(ck.file_id, arg.span, ErrorMessage::SuperfluousArgument);
+            }
+        }
     }
 }

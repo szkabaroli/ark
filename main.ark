@@ -2,11 +2,18 @@ struct test_test {
     a: bool
 }
 
-main: fn() -> test_test {
-    let a: bool = false;
-    let b = test_test { a: a };
-    print(b);
-    return b;
+one: fn() -> int32 {
+    let t: bool = false;
+    return 1;
+}
+
+main: fn() -> int32 {
+    let a: int32 = (10 - 10) - 10;
+    let b: int32 = 0;
+    let s: int32 = 10 + 10;
+    42 + 10;
+    one();
+    return a;
 }
 
 // Builtins

@@ -5,6 +5,14 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Launch WASM",
+            "program": "wasmtime",
+            "args": ["-D", "debug-info=y","-D", "logging=y", "--dir", ".", "./test.wasm"],
+            "cwd": "${workspaceFolder}"
+        },
+        {
             "name": "Launch Chrome",
             "request": "launch",
             "type": "chrome",
@@ -162,7 +170,7 @@
                     "kind": "bin"
                 }
             },
-            "args": ["-f", "main.ark", "--backend", "llvm"],
+            "args": ["-f", "main.ark", "--backend", "wasm"],
             "cwd": "${workspaceFolder}"
         },
         {
